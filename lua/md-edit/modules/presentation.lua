@@ -53,8 +53,8 @@ local function show_slide()
     return
   end
 
-  vim.api.nvim_buf_set_option(state.bufnr, "modifiable", true)
-  vim.api.nvim_buf_set_option(state.bufnr, "readonly", false)
+  vim.bo[state.bufnr].modifiable = true
+  vim.bo[state.bufnr].readonly = false
 
   local display_lines = {}
   local total_width = vim.api.nvim_win_get_width(state.win_id)
@@ -65,12 +65,12 @@ local function show_slide()
   local margin = 0
 
   if
-    vim.api.nvim_win_get_option(state.win_id, "number") or
-    vim.api.nvim_win_get_option(state.win_id, "relativenumber")
+    vim.wo[state.win_id].number or
+    vim.wo[state.win_id].relativenumber
   then
-    margin = signcolumn_width + vim.api.nvim_win_get_option(state.win_id, "numberwidth")
+    margin = signcolumn_width + vim.wo[state.win_id].numberwidth
   else
-    local foldcolumn = vim.api.nvim_win_get_option(state.win_id, "foldcolumn")
+    local foldcolumn = vim.wo[state.win_id].foldcolumn
     margin = signcolumn_width + tonumber(foldcolumn)
   end
 
@@ -130,8 +130,8 @@ local function show_slide()
   end
 
   vim.api.nvim_buf_set_lines(state.bufnr, 0, -1, false, display_lines)
-  vim.api.nvim_buf_set_option(state.bufnr, "modifiable", false)
-  vim.api.nvim_buf_set_option(state.bufnr, "readonly", true)
+  vim.bo[state.bufnr].modifiable = false
+  vim.bo[state.bufnr].readonly = true
   vim.cmd("doautocmd FileType markdown")
 end
 
@@ -217,15 +217,14 @@ function M.start_presentation()
   end
 
   state.bufnr = vim.api.nvim_create_buf(false, true)
-  vim.api.nvim_buf_set_option(state.bufnr, "filetype", "markdown")
-  vim.api.nvim_buf_set_option(state.bufnr, "modifiable", false)
-  vim.api.nvim_buf_set_option(state.bufnr, "readonly", true)
-  vim.api.nvim_buf_set_option(state.bufnr, "bufhidden", "wipe")
-  vim.api.nvim_buf_set_option(state.bufnr, "swapfile", false)
-  vim.api.nvim_buf_set_option(state.bufnr, "wrap", false)
+  vim.bo[state.bufnr].filetype = "markdown"
+  vim.bo[state.bufnr].modifiable = false
+  vim.bo[state.bufnr].readonly = true
+  vim.bo[state.bufnr].bufhidden = "wipe"
+  vim.bo[state.bufnr].swapfile = false
 
-  local total_width = tonumber(vim.api.nvim_get_option("columns"))
-  local total_height = tonumber(vim.api.nvim_get_option("lines"))
+  local total_width = vim.o.columns
+  local total_height = vim.o.lines
   local content_win_opts = {
     relative = "editor",
     width = total_width,
@@ -238,19 +237,20 @@ function M.start_presentation()
 
   state.win_id = vim.api.nvim_open_win(state.bufnr, true, content_win_opts)
 
-  vim.api.nvim_win_set_option(state.win_id, "number", config.options.presentation.show_line_numbers)
-  vim.api.nvim_win_set_option(state.win_id, "relativenumber", config.options.presentation.show_relative_line_numbers)
-  vim.api.nvim_win_set_option(state.win_id, "signcolumn", "yes")
-  vim.api.nvim_win_set_option(state.win_id, "winhighlight", "Normal:Normal")
+  vim.wo[state.win_id].number = config.options.presentation.show_line_numbers
+  vim.wo[state.win_id].relativenumber = config.options.presentation.show_relative_line_numbers
+  vim.wo[state.win_id].signcolumn = "yes"
+  vim.wo[state.win_id].winhighlight = "Normal:Normal"
+  vim.wo[state.win_id].wrap = false
 
   -- Use foldcolumn for left gutter when line numbers are disabled, numberwidth when enabled
   if config.options.presentation.show_line_numbers or config.options.presentation.show_relative_line_numbers then
-    vim.api.nvim_win_set_option(state.win_id, "numberwidth", config.options.presentation.gutter_width)
-    vim.api.nvim_win_set_option(state.win_id, "foldcolumn", "0")
+    vim.wo[state.win_id].numberwidth = config.options.presentation.gutter_width
+    vim.wo[state.win_id].foldcolumn = "0"
   else
     -- foldcolumn max is 9, so clamp the gutter_width value
     local foldcolumn_value = math.min(config.options.presentation.gutter_width, 9)
-    vim.api.nvim_win_set_option(state.win_id, "foldcolumn", tostring(foldcolumn_value))
+    vim.wo[state.win_id].foldcolumn = tostring(foldcolumn_value)
     -- Don't set numberwidth when line numbers are off - it has no effect anyway
   end
 
