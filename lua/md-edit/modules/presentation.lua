@@ -12,6 +12,42 @@ local state = {
   header_center = "",
 }
 
+local function word_wrap(text, width)
+  if #text <= width then
+    return { text }
+  end
+
+  local lines = {}
+  local current_line = ""
+
+  -- Split text into words
+  for word in text:gmatch("%S+") do
+    local space = (current_line == "") and "" or " "
+    local test_line = current_line .. space .. word
+
+    if #test_line <= width then
+      current_line = test_line
+    else
+      -- Current line is full, save it and start new line
+      if current_line ~= "" then
+        table.insert(lines, current_line)
+        current_line = word
+      else
+        -- Single word exceeds width, truncate it
+        table.insert(lines, word:sub(1, width))
+        current_line = ""
+      end
+    end
+  end
+
+  -- Add remaining text
+  if current_line ~= "" then
+    table.insert(lines, current_line)
+  end
+
+  return #lines > 0 and lines or { "" }
+end
+
 local function show_slide()
   if not state.win_id then
     return
@@ -24,13 +60,21 @@ local function show_slide()
   local total_width = vim.api.nvim_win_get_width(state.win_id)
   local total_height = vim.api.nvim_win_get_height(state.win_id)
 
-  local gutter_width = 2 -- Approximation for signcolumn='yes'
+  -- Calculate margins: signcolumn on left only, symmetric margin on both sides
+  local signcolumn_width = 2 -- Approximation for signcolumn='yes'
+  local margin = 0
+
   if
-    vim.api.nvim_win_get_option(state.win_id, "number") or vim.api.nvim_win_get_option(state.win_id, "relativenumber")
+    vim.api.nvim_win_get_option(state.win_id, "number") or
+    vim.api.nvim_win_get_option(state.win_id, "relativenumber")
   then
-    gutter_width = gutter_width + vim.api.nvim_win_get_option(state.win_id, "numberwidth")
+    margin = signcolumn_width + vim.api.nvim_win_get_option(state.win_id, "numberwidth")
+  else
+    local foldcolumn = vim.api.nvim_win_get_option(state.win_id, "foldcolumn")
+    margin = signcolumn_width + tonumber(foldcolumn)
   end
-  total_width = total_width - gutter_width
+
+  total_width = total_width - (margin * 2)
 
   -- Construct the new header
   local left_text = state.header_left or ""
@@ -38,14 +82,14 @@ local function show_slide()
   local slide_counter = string.format("%d/%d", state.current_slide, #state.slides)
 
   -- Account for 1 space at each end
-  local effective_total_width = total_width - 2
+  local header_width = total_width - 2
 
-  local padding1 = math.floor((effective_total_width - #center_text) / 2) - #left_text
+  local padding1 = math.floor((header_width - #center_text) / 2) - #left_text
   if padding1 < 0 then
     padding1 = 0
   end
 
-  local padding2 = effective_total_width - #left_text - padding1 - #center_text - #slide_counter
+  local padding2 = header_width - #left_text - padding1 - #center_text - #slide_counter
   if padding2 < 0 then
     padding2 = 0
   end
@@ -55,7 +99,7 @@ local function show_slide()
     .. center_text
     .. string.rep(" ", padding2)
     .. slide_counter
-  header_line_content = header_line_content:sub(1, effective_total_width) -- Truncate if needed
+  header_line_content = header_line_content:sub(1, header_width) -- Truncate if needed
 
   local header_line = " " .. header_line_content .. " "
   header_line = header_line:sub(1, total_width) -- Ensure it fits total_width
@@ -72,7 +116,11 @@ local function show_slide()
 
   local current_content_lines = vim.split(state.slides[state.current_slide], "\n")
   for _, line in ipairs(current_content_lines) do
-    table.insert(display_lines, line)
+    -- Word-wrap each line to fit within total_width
+    local wrapped_lines = word_wrap(line, total_width)
+    for _, wrapped_line in ipairs(wrapped_lines) do
+      table.insert(display_lines, wrapped_line)
+    end
   end
 
   -- Add vertical padding to fill the rest of the screen
@@ -194,7 +242,17 @@ function M.start_presentation()
   vim.api.nvim_win_set_option(state.win_id, "relativenumber", config.options.presentation.show_relative_line_numbers)
   vim.api.nvim_win_set_option(state.win_id, "signcolumn", "yes")
   vim.api.nvim_win_set_option(state.win_id, "winhighlight", "Normal:Normal")
-  vim.api.nvim_win_set_option(state.win_id, "numberwidth", config.options.presentation.gutter_width)
+
+  -- Use foldcolumn for left gutter when line numbers are disabled, numberwidth when enabled
+  if config.options.presentation.show_line_numbers or config.options.presentation.show_relative_line_numbers then
+    vim.api.nvim_win_set_option(state.win_id, "numberwidth", config.options.presentation.gutter_width)
+    vim.api.nvim_win_set_option(state.win_id, "foldcolumn", "0")
+  else
+    -- foldcolumn max is 9, so clamp the gutter_width value
+    local foldcolumn_value = math.min(config.options.presentation.gutter_width, 9)
+    vim.api.nvim_win_set_option(state.win_id, "foldcolumn", tostring(foldcolumn_value))
+    -- Don't set numberwidth when line numbers are off - it has no effect anyway
+  end
 
   show_slide()
 
