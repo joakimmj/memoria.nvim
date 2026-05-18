@@ -1,8 +1,8 @@
-# md-edit.nvim
+# memoria.nvim
 
-`md-edit.nvim` is a Neovim plugin that provides a suite of tools for enhanced
-Markdown editing and a built-in presentation mode. The plugin is designed to be
-lightweight, configurable, and easy to use.
+`memoria.nvim` is a Neovim plugin that provides a suite of tools for note
+taking, enhanced Markdown editing and a built-in presentation mode. The plugin
+is designed to be lightweight, configurable, and easy to use.
 
 ## ✨ Features
 
@@ -11,7 +11,7 @@ lightweight, configurable, and easy to use.
 
 ## 📦 Installation
 
-Install `md-edit.nvim` using your favorite plugin manager.
+Install `memoria.nvim` using your favorite plugin manager.
 
 <details>
   <summary>lazy.nvim</summary>
@@ -19,7 +19,7 @@ Install `md-edit.nvim` using your favorite plugin manager.
   [lazy.nvim](https://github.com/folke/lazy.nvim)
   ```lua
   {
-    "joakimmj/md-edit.nvim",
+    "joakimmj/memoria.nvim",
     -- Optional: ft = "markdown",
   }
   ```
@@ -31,17 +31,17 @@ Install `md-edit.nvim` using your favorite plugin manager.
   [packer.nvim](https://github.com/wbthomason/packer.nvim)
 
   ```lua
-  use "joakimmj/md-edit.nvim"
+  use "joakimmj/memoria.nvim"
   ```
 </details>
 
 ## ⚙️ Configuration
 
-`md-edit.nvim` is configured through its `setup()` function. Here is an example
+`memoria.nvim` is configured through its `setup()` function. Here is an example
 configuration with all the default values:
 
 ```lua
-require("md-edit").setup({
+require("memoria").setup({
   -- Add user commands for all functions in the plugin.
   -- Default: false
   add_commands = false,
@@ -79,10 +79,10 @@ Here is an example of how you can set up keymaps:
 vim.api.nvim_create_autocmd("FileType", {
   pattern = "markdown",
   callback = function()
-    local md = require("md-edit")
+    local mia = require("memoria")
 
     -- Presentation (normal mode)
-    vim.keymap.set("n", "<leader>mps", md.presentation.start_presentation, { desc = "Start Presentation" })
+    vim.keymap.set("n", "<leader>mps", mia.presentation.start_presentation, { desc = "Start Presentation" })
   end,
 })
 ```
@@ -95,9 +95,9 @@ If you set `add_commands = true` in your configuration, the following commands
 will be available:
 
 
-| Command                | Description                                                            |
-| ---------------------- | ---------------------------------------------------------------------- |
-| `:MDPresent`           | Starts a slide-based presentation mode. Slides are separated by `---`. |
+| Command       | Description                                                            |
+| ------------- | ---------------------------------------------------------------------- |
+| `:MiaPresent` | Starts a slide-based presentation mode. Slides are separated by `---`. |
 
 ### Presentation Mode
 

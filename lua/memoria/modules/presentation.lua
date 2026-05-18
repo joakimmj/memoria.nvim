@@ -1,7 +1,7 @@
--- lua/md-edit/modules/presentation.lua
+-- lua/memoria/modules/presentation.lua
 
 local M = {}
-local config = require("md-edit.config")
+local config = require("memoria.config")
 
 local state = {
   win_id = nil,
