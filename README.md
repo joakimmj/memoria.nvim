@@ -9,6 +9,8 @@ is designed to be lightweight, configurable, and easy to use.
 - **Presentation Mode:** View your markdown file as a slide deck directly
   within Neovim.
 - **Task:** Cycle through task list item states (no checkbox -> `[ ]` -> `[x]`).
+- **TOC Generation:** Automatically generate and update a table of contents
+  from your markdown headers.
 
 ## 📦 Installation
 
@@ -88,6 +90,9 @@ vim.api.nvim_create_autocmd("FileType", {
 
     -- Tasks (normal mode)
     vim.keymap.set("n", "<leader>mt", mia.task.toggle, { desc = "Toggle Task" })
+
+    -- Generators (normal mode)
+    vim.keymap.set("n", "<leader>mgt", mia.generator.generate_toc, { desc = "Generate TOC" })
   end,
 })
 ```
@@ -103,6 +108,7 @@ will be available:
 | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
 | `:MiaPresent`               | Starts a slide-based presentation mode. Slides are separated by `---`.                                                                     |
 | `:MiaToggleTask`            | Toggles the state of a list item: `item` -> `[ ] item` -> `[x] item` -> `item`.                                                            |
+| `:MiaGenerateTOC`           | Generates or updates a Table of Contents. The TOC is wrapped in `<!-- TOC -->` and `<!-- /TOC -->` comments.                               |
 
 ### Presentation Mode
 

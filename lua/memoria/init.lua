@@ -18,5 +18,6 @@ end
 
 M.presentation = require("memoria.modules.presentation")
 M.task = require("memoria.modules.task")
+M.generator = require("memoria.modules.generator")
 
 return M
