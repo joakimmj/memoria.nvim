@@ -8,6 +8,7 @@ is designed to be lightweight, configurable, and easy to use.
 
 - **Presentation Mode:** View your markdown file as a slide deck directly
   within Neovim.
+- **Task:** Cycle through task list item states (no checkbox -> `[ ]` -> `[x]`).
 
 ## 📦 Installation
 
@@ -68,6 +69,7 @@ require("memoria").setup({
   },
 })
 ```
+
 ## Mappings
 
 This plugin does not come with any default mappings. You can set up your own
@@ -82,7 +84,10 @@ vim.api.nvim_create_autocmd("FileType", {
     local mia = require("memoria")
 
     -- Presentation (normal mode)
-    vim.keymap.set("n", "<leader>mps", mia.presentation.start_presentation, { desc = "Start Presentation" })
+    vim.keymap.set("n", "<leader>mp", mia.presentation.start_presentation, { desc = "Start Presentation" })
+
+    -- Tasks (normal mode)
+    vim.keymap.set("n", "<leader>mt", mia.task.toggle, { desc = "Toggle Task" })
   end,
 })
 ```
@@ -94,10 +99,10 @@ vim.api.nvim_create_autocmd("FileType", {
 If you set `add_commands = true` in your configuration, the following commands
 will be available:
 
-
-| Command       | Description                                                            |
-| ------------- | ---------------------------------------------------------------------- |
-| `:MiaPresent` | Starts a slide-based presentation mode. Slides are separated by `---`. |
+| Command                     | Description                                                                                                                                |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `:MiaPresent`               | Starts a slide-based presentation mode. Slides are separated by `---`.                                                                     |
+| `:MiaToggleTask`            | Toggles the state of a list item: `item` -> `[ ] item` -> `[x] item` -> `item`.                                                            |
 
 ### Presentation Mode
 

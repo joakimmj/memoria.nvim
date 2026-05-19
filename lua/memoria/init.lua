@@ -17,5 +17,6 @@ function M.setup(opts)
 end
 
 M.presentation = require("memoria.modules.presentation")
+M.task = require("memoria.modules.task")
 
 return M
