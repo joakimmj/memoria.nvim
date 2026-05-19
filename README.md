@@ -12,6 +12,11 @@ is designed to be lightweight, configurable, and easy to use.
 - **TOC Generation:** Automatically generate and update a table of contents
   from your markdown headers.
 - **Callout:** Adding callout block qoute
+- **Generators:** Quickly create tables, links, images, footnotes, block
+  quotes, callouts, and more.
+- **Text Formatting:** Easily toggle bold, italic, strikethrough, and inline
+  code on selected text.
+- **And more...**
 
 ## 📦 Installation
 
@@ -38,6 +43,40 @@ Install `memoria.nvim` using your favorite plugin manager.
   use "joakimmj/memoria.nvim"
   ```
 </details>
+
+## Dependencies
+
+This plugin requires `nvim-treesitter` to function correctly. Please ensure you
+have it installed and configured.
+
+```lua
+-- For lazy.nvim
+{
+  "nvim-treesitter/nvim-treesitter",
+  build = ":TSUpdate",
+  config = function()
+    require("nvim-treesitter.configs").setup({
+      ensure_installed = { "markdown", "markdown_inline" },
+      highlight = { enable = true },
+    })
+  end,
+},
+
+-- For packer.nvim
+use {
+  "nvim-treesitter/nvim-treesitter",
+  run = ":TSUpdate",
+  config = function()
+    require("nvim-treesitter.configs").setup({
+      ensure_installed = { "markdown", "markdown_inline" },
+      highlight = { enable = true },
+    })
+  end,
+}
+```
+
+You must have the `markdown` and `markdown_inline` parsers installed for the
+plugin to work.
 
 ## ⚙️ Configuration
 
@@ -102,9 +141,22 @@ vim.api.nvim_create_autocmd("FileType", {
     -- Tasks (normal mode)
     vim.keymap.set("n", "<leader>mt", mia.task.toggle, { desc = "Toggle Task" })
 
+    -- Formatting (visual mode)
+    vim.keymap.set("v", "<leader>mfb", mia.format.toggle_bold, { desc = "Toggle Bold" })
+    vim.keymap.set("v", "<leader>mfi", mia.format.toggle_italic, { desc = "Toggle Italic" })
+    vim.keymap.set("v", "<leader>mfs", mia.format.toggle_strikethrough, { desc = "Toggle Strikethrough" })
+    vim.keymap.set("v", "<leader>mfc", mia.format.toggle_inline_code, { desc = "Toggle Inline Code" })
+
     -- Generators (normal mode)
     vim.keymap.set("n", "<leader>mgt", mia.generator.generate_toc, { desc = "Generate TOC" })
+    vim.keymap.set("n", "<leader>mgT", mia.generator.add_table, { desc = "Add Table" })
+    vim.keymap.set("n", "<leader>mgl", mia.generator.add_link, { desc = "Add Link" })
+    vim.keymap.set("n", "<leader>mgi", mia.generator.add_image, { desc = "Add Image" })
+    vim.keymap.set("n", "<leader>mgf", mia.generator.add_footnote, { desc = "Add Footnote" })
+    vim.keymap.set("n", "<leader>mgc", mia.generator.add_code_block, { desc = "Add Code Block" })
+    vim.keymap.set("n", "<leader>mgq", mia.generator.add_block_quote, { desc = "Add Block Quote" })
     vim.keymap.set("n", "<leader>mgo", mia.generator.add_callout, { desc = "Add Callout" })
+    vim.keymap.set("n", "<leader>mgr", mia.generator.add_reference_style_link, { desc = "Add Reference-Style Link" })
   end,
 })
 ```
@@ -122,6 +174,13 @@ will be available:
 | `:MiaToggleTask`            | Toggles the state of a list item: `item` -> `[ ] item` -> `[x] item` -> `item`.                                                            |
 | `:MiaGenerateTOC`           | Generates or updates a Table of Contents. The TOC is wrapped in `<!-- TOC -->` and `<!-- /TOC -->` comments.                               |
 | `:MiaAddCallout`            | Prompts to select a callout type and inserts a GFM callout block.                                                                          |
+| `:MiaAddBlockQuote`         | Adds a block quote to the current line, with support for nesting.                                                                          |
+| `:MiaAddTable`              | Prompts for the number of rows and columns and generates a Markdown table.                                                                 |
+| `:MiaAddLink`               | Prompts for link text and a URL and inserts a Markdown link. The cursor is placed after the link.                                          |
+| `:MiaGenerateImage`         | Prompts for image alt text and a URL and inserts a Markdown image link.                                                                    |
+| `:MiaAddFootnote`           | Prompts for footnote text and inserts a footnote reference (with auto-incrementing number) and definition.                                 |
+| `:MiaAddCodeBlock`          | Prompts for a language and whether to tangle, then inserts a fenced code block with the cursor inside.                                     |
+| `:MiaAddReferenceStyleLink` | Adds a reference-style link. If the reference already exists, it is reused. Otherwise, a new reference is added to the bottom of the file. |
 
 ### Presentation Mode
 
