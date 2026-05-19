@@ -15,5 +15,6 @@ vim.api.nvim_create_autocmd("FileType", {
     vim.api.nvim_buf_create_user_command(bufnr, "MiaPresent", mia.presentation.start_presentation, {})
     vim.api.nvim_buf_create_user_command(bufnr, "MiaToggleTask", mia.task.toggle, {})
     vim.api.nvim_buf_create_user_command(bufnr, "MiaGenerateTOC", mia.generator.generate_toc, {})
+    vim.api.nvim_buf_create_user_command(bufnr, "MiaAddCallout", mia.generator.add_callout, {})
   end,
 })

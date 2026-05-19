@@ -11,6 +11,7 @@ is designed to be lightweight, configurable, and easy to use.
 - **Task:** Cycle through task list item states (no checkbox -> `[ ]` -> `[x]`).
 - **TOC Generation:** Automatically generate and update a table of contents
   from your markdown headers.
+- **Callout:** Adding callout block qoute
 
 ## 📦 Installation
 
@@ -48,6 +49,16 @@ require("memoria").setup({
   -- Add user commands for all functions in the plugin.
   -- Default: false
   add_commands = false,
+
+  -- Callout types to use for `add_callout`.
+  -- These are the GitHub Flavored Markdown callout types.
+  callout_types = {
+    "NOTE",
+    "TIP",
+    "IMPORTANT",
+    "WARNING",
+    "CAUTION",
+  },
 
   presentation = {
     -- Show line numbers in presentation mode.
@@ -93,6 +104,7 @@ vim.api.nvim_create_autocmd("FileType", {
 
     -- Generators (normal mode)
     vim.keymap.set("n", "<leader>mgt", mia.generator.generate_toc, { desc = "Generate TOC" })
+    vim.keymap.set("n", "<leader>mgo", mia.generator.add_callout, { desc = "Add Callout" })
   end,
 })
 ```
@@ -109,6 +121,7 @@ will be available:
 | `:MiaPresent`               | Starts a slide-based presentation mode. Slides are separated by `---`.                                                                     |
 | `:MiaToggleTask`            | Toggles the state of a list item: `item` -> `[ ] item` -> `[x] item` -> `item`.                                                            |
 | `:MiaGenerateTOC`           | Generates or updates a Table of Contents. The TOC is wrapped in `<!-- TOC -->` and `<!-- /TOC -->` comments.                               |
+| `:MiaAddCallout`            | Prompts to select a callout type and inserts a GFM callout block.                                                                          |
 
 ### Presentation Mode
 

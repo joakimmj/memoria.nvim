@@ -62,4 +62,48 @@ function M.generate_toc()
   end
 end
 
+function M.add_callout()
+  local config = require("memoria.config")
+  local callout_types = config.options.callout_types
+
+  vim.ui.select(callout_types, { prompt = "Select callout type:" }, function(choice)
+    if not choice then
+      return
+    end
+
+    local callout = {
+      "> [!" .. choice .. "]",
+      "> ",
+    }
+
+    local bufnr = vim.api.nvim_get_current_buf()
+    local cursor_pos = vim.api.nvim_win_get_cursor(0)
+
+    local parser = vim.treesitter.get_parser(bufnr, "markdown")
+    local tree = parser:parse()[1]
+    local root = tree:root()
+
+    local node_at_cursor = root:descendant_for_range(cursor_pos[1] - 1, cursor_pos[2], cursor_pos[1] - 1, cursor_pos[2])
+
+    local bq_node
+    local temp_node = node_at_cursor
+    while temp_node do
+      if temp_node:type() == "block_quote" then
+        bq_node = temp_node
+        break
+      end
+      temp_node = temp_node:parent()
+    end
+
+    local insert_line_num = cursor_pos[1]
+    if bq_node then
+      local start_row, _, _, _ = bq_node:range()
+      insert_line_num = start_row + 1
+    end
+
+    vim.api.nvim_buf_set_lines(bufnr, insert_line_num - 1, insert_line_num - 1, false, callout)
+    vim.api.nvim_win_set_cursor(0, { insert_line_num, 3 })
+  end)
+end
+
 return M
