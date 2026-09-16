@@ -1,9 +1,16 @@
 {
     "runtime": {
-        "version": "LuaJIT"
+        "version": "LuaJIT",
+        "path": [
+            "lua/?.lua",
+            "lua/?/init.lua"
+        ]
     },
     "workspace": {
-        "checkThirdParty": false
+        "checkThirdParty": false,
+        "library": [
+            "$VIMRUNTIME/lua"
+        ]
     },
     "telemetry": {
         "enable": false

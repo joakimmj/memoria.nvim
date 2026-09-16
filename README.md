@@ -1,6 +1,17 @@
 # memoria.nvim
 
-`memoria.nvim` is a note taking plugin.
+`memoria.nvim` is a note taking plugin. Notes are plain markdown, kept in
+brains — folders you register — and created with the same structure every time.
+
+Full reference: `:help memoria`.
+
+## ✨ Features
+
+- **Brains:** Register any folder as a brain, list them, switch between them.
+- **Engrams:** Create a note with a dated or plain filename, a generated
+  frontmatter and synapse header, and your own content template.
+- **Per-brain config:** Override any setting for one brain in its
+  `.mia_dna.json`.
 
 ## 📦 Installation
 
@@ -11,6 +22,7 @@
 
   ```lua
   vim.pack.add({
+    "https://github.com/joakimmj/md-drafting.nvim",
     "https://github.com/joakimmj/memoria.nvim",
   })
   ```
@@ -22,7 +34,7 @@
   ```lua
   {
     "joakimmj/memoria.nvim",
-    -- Optional: ft = "markdown",
+    dependencies = { "joakimmj/md-drafting.nvim" },
   }
   ```
 </details>
@@ -31,7 +43,7 @@
   <summary>packer.nvim</summary>
 
   ```lua
-  use "joakimmj/memoria.nvim"
+  use({ "joakimmj/memoria.nvim", requires = { "joakimmj/md-drafting.nvim" } })
   ```
 </details>
 
@@ -40,3 +52,63 @@
 > - `nvim-treesitter` with the `markdown` and `markdown_inline` parsers
 > - [md-drafting.nvim](https://github.com/joakimmj/md-drafting.nvim)
 
+## ⚙️ Configuration
+
+Every value below is the default, so an empty `setup()` call — or none at
+all — gives exactly this. See `:help memoria-config`.
+
+```lua
+require("memoria").setup({
+  -- Create the :Mia* user commands.
+  add_commands = false,
+
+  engrams = {
+    -- Tokens: YYYY, YY, MM, DD, HH, mm, ss. Used by the filename prefix
+    -- and %date%.
+    date_format = "YYYYMMDD",
+
+    filename = {
+      -- "date" or "none".
+      prefix = "date",
+      -- Between the prefix and the slug, and for spaces in the slug.
+      separator = "_",
+    },
+
+    -- Prose under the generated header. %cursor% marks where typing starts;
+    -- %title% and %date% are expanded.
+    content_template = "\n# %title%\n\n%cursor%",
+  },
+
+  -- Fields on an engram: target "engram" writes a link in the SYNAPSES
+  -- block, "concept" a frontmatter list. show_empty writes the field even
+  -- with no values. Both are written sorted by name.
+  synapses = {
+    up = { target = "engram", show_empty = true },
+    down = { target = "engram", show_empty = true },
+    tags = { target = "concept" },
+  },
+})
+```
+
+Maps merge by key, so one `filename` entry leaves the rest alone. Lists
+replace wholesale.
+
+A brain can override any of it in its own `.mia_dna.json`, holding only what
+differs — `:MiaBrainConfig` opens it, see `:help memoria-mia_dna.json`:
+
+```json
+{ "engrams": { "filename": { "prefix": "none" } } }
+```
+
+## 🚀 Usage
+
+```vim
+:MiaBrainAdd ~/notes/work
+:MiaBrainSwitch work
+:MiaBrainCurrent
+:MiaEngramAdd
+:MiaBrainConfig
+```
+
+Every command is also a Lua function, e.g.
+`require("memoria").engram.add_engram()`. See `:help memoria-api`.

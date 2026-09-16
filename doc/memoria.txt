@@ -1,0 +1,185 @@
+*memoria.txt*	Note taking in brains of markdown engrams		*memoria*
+
+Author:  joakimmj
+License: MIT
+
+==============================================================================
+CONTENTS                                                *memoria-contents*
+
+    1. Introduction ........................... |memoria-introduction|
+    2. Requirements ........................... |memoria-requirements|
+    3. Configuration .......................... |memoria-config|
+    4. Brains ................................. |memoria-brains|
+    5. Engrams ................................ |memoria-engrams|
+    6. Commands ............................... |memoria-commands|
+    7. API .................................... |memoria-api|
+
+==============================================================================
+1. INTRODUCTION                                     *memoria-introduction*
+
+memoria.nvim keeps notes as plain markdown. A brain is a folder of notes; an
+engram is one note in it. Files stay readable without the plugin.
+
+Nothing is mapped by default.
+
+==============================================================================
+2. REQUIREMENTS                                     *memoria-requirements*
+
+Neovim 0.10 or later, and md-drafting.nvim with its `api` table.
+`setup()` checks for it and stops with an error when it is missing.
+
+==============================================================================
+3. CONFIGURATION                                          *memoria-config*
+
+Three tiers, later over earlier: built-in defaults, `setup()`, and the
+brain's own `.mia_dna.json`. Maps merge by key; lists replace wholesale.
+Every value below is the default: >lua
+
+    require("memoria").setup({
+      -- Create the :Mia* user commands.
+      add_commands = false,
+
+      engrams = {
+        -- Tokens: YYYY, YY, MM, DD, HH, mm, ss.
+        date_format = "YYYYMMDD",
+        filename = {
+          -- "date" or "none".
+          prefix = "date",
+          separator = "_",
+        },
+        -- Prose under the generated header. %cursor% marks where typing
+        -- starts; %title% and %date% are expanded.
+        content_template = "\n# %title%\n\n%cursor%",
+      },
+
+      -- Engram fields go in the SYNAPSES block, concept fields in
+      -- frontmatter. Both are written sorted by name.
+      synapses = {
+        -- target: "engram" or "concept". show_empty writes the field
+        -- even with no values.
+        up = { target = "engram", show_empty = true },
+        down = { target = "engram", show_empty = true },
+        tags = { target = "concept" },
+      },
+    })
+<
+                                                      *memoria-mia_dna.json*
+A brain's `.mia_dna.json` holds only what differs, with the same keys: >json
+
+    { "engrams": { "filename": { "prefix": "none" } } }
+<
+|:MiaBrainConfig| opens the file, writing `{}` first when the brain has none.
+Keys left out follow `setup()` and the defaults, so an override keeps working
+when those change — write only what this brain needs. It cannot set
+`add_commands`. JSON has no comments. An unreadable or invalid file is
+reported and skipped.
+
+==============================================================================
+4. BRAINS                                                 *memoria-brains*
+
+Brains are registered per machine in `stdpath("data")/memoria/brains.json`,
+with absolute locations. Deregistering never touches files.
+
+The active brain lives for the session only. When a brain is not named, it
+is resolved in this order:
+
+    1. the brain holding the current buffer's file
+    2. the active brain
+    3. a picker over registered brains
+
+So the active brain is not always the one acted on. |:MiaBrainCurrent| says
+which brain would be, and prompts name their brain, e.g. >
+
+    (work) Engram title:
+<
+
+==============================================================================
+5. ENGRAMS                                               *memoria-engrams*
+
+`add_engram` prompts for a title. The title is written as typed into
+%title%; the filename uses its slug: >
+
+    Note about Java
+    20260801_note_about_java.md      prefix = "date"
+    note_about_java.md               prefix = "none"
+<
+The slug is lowercased, whitespace becomes `filename.separator`, and
+characters no filesystem allows (/ \ : * ? " < > |) are dropped. When the file
+already exists, or nothing usable is left, the prompt asks again with the
+title filled in.
+
+The file gets a generated header, then the content template: >markdown
+
+    ---
+    tags: []
+    ---
+    <!-- SYNAPSES -->
+    - **down:**
+    - **up:**
+    ***
+    <!-- /SYNAPSES -->
+
+    # Note about Java
+<
+The buffer opens with the cursor at %cursor%.
+
+==============================================================================
+6. COMMANDS                                             *memoria-commands*
+
+With `add_commands = true`, these global commands are created.
+
+                                                              *:MiaBrainAdd*
+:MiaBrainAdd {path} [name]  Register {path} as a brain, creating it if
+                            missing. [name] defaults to the folder name.
+                                                       *:MiaBrainDeregister*
+:MiaBrainDeregister {name}  Remove a brain from the registry
+                                                             *:MiaBrainList*
+:MiaBrainList               List brains; `*` marks the active one, `>` the
+                            one holding the current buffer, "(config)" a
+                            brain with its own .mia_dna.json, ⚠ a missing
+                            folder
+                                                          *:MiaBrainCurrent*
+:MiaBrainCurrent            Show the brain commands would act on, and why
+                                                           *:MiaBrainSwitch*
+:MiaBrainSwitch {name}      Set the active brain
+                                                           *:MiaBrainConfig*
+:MiaBrainConfig [brain]     Open the brain's .mia_dna.json, creating an
+                            empty one when it has none
+                                                             *:MiaEngramAdd*
+:MiaEngramAdd [brain]       Create an engram and open it
+
+==============================================================================
+7. API                                                       *memoria-api*
+
+    local memoria = require("memoria")
+
+    memoria.setup({opts})
+        Check the dependency, store options, create commands.
+
+    memoria.brain.add({path}, {name})
+        Register a folder as a brain. Returns the brain, or nil.
+    memoria.brain.deregister({name})
+        Remove a brain from the registry.
+    memoria.brain.switch({name})
+        Set the active brain.
+    memoria.brain.active()
+        The active brain, or nil.
+    memoria.brain.current()
+        The brain commands would act on, and why, or nil.
+    memoria.brain.get({name})
+        A registered brain, or nil.
+    memoria.brain.list()
+        Every brain, sorted by name.
+    memoria.brain.names()
+        Every brain name, sorted.
+    memoria.brain.open_config({name})
+        Open a brain's .mia_dna.json, creating "{}" when it has none.
+    memoria.brain.resolve({name}, {callback})
+        Resolve a brain (see |memoria-brains|) and pass it to {callback}.
+
+    memoria.engram.add_engram({brain}, {opts})
+        Create an engram and open it. {opts}.title seeds the title prompt.
+
+A brain is `{ name, location }`.
+
+ vim:tw=78:ts=8:noet:ft=help:norl:
