@@ -67,7 +67,7 @@ all — gives exactly this. See `:help memoria-config`.
 ```lua
 require("memoria").setup({
   -- Create the :Mia* user commands.
-  add_commands = false,
+  add_commands = false, -- default true
 
   engrams = {
     -- Tokens: YYYY, YY, MM, DD, HH, mm, ss. Used by the filename prefix
@@ -92,6 +92,8 @@ require("memoria").setup({
   synapses = {
     up = { target = "engram", show_empty = true },
     down = { target = "engram", show_empty = true },
+    -- what if a brain want to remove up/down?
+    -- empty synapses section?
     tags = { target = "concept" },
   },
 })
@@ -112,7 +114,7 @@ differs — `:MiaBrainConfig` opens it, see `:help memoria-mia_dna.json`:
 ```vim
 :MiaBrainAdd ~/notes/work
 :MiaBrainSwitch work
-:MiaBrainCurrent
+:MiaBrainCurrent // MiaBrainList should probably be enough 
 :MiaEngramAdd
 :MiaBrainConfig
 ```
