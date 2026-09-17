@@ -3,12 +3,12 @@
 Memoria is a note-taking system built around a simple idea:  
 «your notes are memories, and memories live in a brain»
 
-- A brain is a folder of notes — one for work, one personal, one per project.
-- An engram is a single note — a meeting record, a recipe, a project plan.
-- A synapse is a link between two engrams — connecting one note to another.
-- A concept is anything you reference that isn't itself a note — a person, a topic, a tag.
+- A **brain** is a folder of notes — one for work, one personal, one per project.
+- An **engram** is a single note — a meeting record, a recipe, a project plan.
+- A **synapse** is a link from a note — to another note, or to a concept.
+- A **concept** is anything you reference that isn't itself a note — a person, a topic, a tag.
 
-A brain holds engrams. Engrams connect to each other through synapses, and point at concepts when they mention something — someone, a topic — that isn't a note of its own.
+A brain holds engrams, connected to each other and to concepts through synapses.
 
 Full reference: `:help memoria`.
 
