@@ -5,6 +5,8 @@ Memoria is a note-taking system built around a simple idea:
 
 notes are something you want to remember, like memories in the brain.
 
+write down what you want to remember and keep it like a memory, in a brain.
+
 - A **brain** is a folder of notes — one for work, one personal, one per project.
 - An **engram** is a single note — a meeting record, a recipe, a project plan.
 - A **synapse** is a link from a note — to another note, or to a concept.
