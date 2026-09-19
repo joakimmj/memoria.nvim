@@ -176,6 +176,23 @@ function M.current()
   end
 end
 
+--- Pick a registered brain. The one picker that does not name a brain, since
+--- it is what decides one.
+---@param callback fun(brain: memoria.Brain) Called once picked
+function M.pick(callback)
+  local names = M.names()
+  if #names == 0 then
+    vim.notify("memoria: no brains registered; add one with :MiaBrainAdd", vim.log.levels.WARN)
+    return
+  end
+
+  vim.ui.select(names, { prompt = "Brain:" }, function(choice)
+    if choice then
+      callback(M.get(choice) --[[@as memoria.Brain]])
+    end
+  end)
+end
+
 --- Resolve a brain: by name, by current buffer, active, then picker.
 ---@param name? string Brain name
 ---@param callback fun(brain: memoria.Brain) Called once resolved
@@ -194,17 +211,7 @@ function M.resolve(name, callback)
     return callback(brain)
   end
 
-  local names = M.names()
-  if #names == 0 then
-    vim.notify("memoria: no brains registered; add one with :MiaBrainAdd", vim.log.levels.WARN)
-    return
-  end
-
-  vim.ui.select(names, { prompt = "Brain:" }, function(choice)
-    if choice then
-      callback(M.get(choice) --[[@as memoria.Brain]])
-    end
-  end)
+  M.pick(callback)
 end
 
 --- Open a brain's own config, creating an empty one when it has none. What the

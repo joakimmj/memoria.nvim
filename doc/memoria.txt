@@ -198,14 +198,15 @@ These global commands are created unless `add_commands = false`.
 :MiaBrainAdd {path} [name]  Register {path} as a brain, creating it if
                             missing. [name] defaults to the folder name.
                                                        *:MiaBrainDeregister*
-:MiaBrainDeregister {name}  Remove a brain from the registry
+:MiaBrainDeregister [name]  Remove a brain from the registry; picked when
+                            not named
                                                              *:MiaBrainList*
 :MiaBrainList               List brains; `*` marks the active one, `>` the
                             one holding the current buffer, "(config)" a
                             brain with its own .mia_dna.json, ⚠ a missing
                             folder
                                                            *:MiaBrainSwitch*
-:MiaBrainSwitch {name}      Set the active brain
+:MiaBrainSwitch [name]      Set the active brain; picked when not named
                                                            *:MiaBrainConfig*
 :MiaBrainConfig [brain]     Open the brain's .mia_dna.json, creating an
                             empty one when it has none
@@ -244,6 +245,8 @@ These global commands are created unless `add_commands = false`.
         Every brain name, sorted.
     memoria.brain.open_config({name})
         Open a brain's .mia_dna.json, creating "{}" when it has none.
+    memoria.brain.pick({callback})
+        Pick a registered brain and pass it to {callback}.
     memoria.brain.resolve({name}, {callback})
         Resolve a brain (see |memoria-brains|) and pass it to {callback}.
 

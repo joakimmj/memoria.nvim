@@ -693,6 +693,25 @@ stored = atlas.refresh(graph) --[[@as memoria.Atlas]]
 check("refresh, vanished engram dropped", stored.engrams["c.md"], nil)
 check("refresh, its tasks dropped", stored.tasks.not_done, {})
 
+-- commands: a brain that is chosen, not resolved, is picked when not named
+
+require("memoria.commands").create()
+brain.add(scratch .. "/picked", "picked")
+vim.cmd.edit(vim.fn.fnameescape(engram_path("a.md")))
+choices, selects = { "picked" }, {}
+vim.cmd("MiaBrainSwitch")
+check("MiaBrainSwitch, no name: picker, not the buffer's brain", { selects[1].prompt, brain.active() }, {
+  "Brain:",
+  brain.get("picked"),
+})
+choices = { "picked" }
+vim.cmd("MiaBrainDeregister")
+check("MiaBrainDeregister, no name: picker", brain.get("picked"), nil)
+choices = {}
+vim.cmd("MiaBrainSwitch graph")
+check("MiaBrainSwitch, named: no picker", brain.active(), graph)
+vim.cmd("enew")
+
 -- modules: atlas, rebuild
 
 -- b.down loses a by hand; a.down, a.up and b.up still point at the deleted c.

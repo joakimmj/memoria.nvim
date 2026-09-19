@@ -17,6 +17,19 @@ local function complete_brains(lead)
   end, brain.names())
 end
 
+--- Run with the named brain, or one picked when none is named. Never the
+--- current or active brain: these commands choose a brain, not act in one.
+---@param name string Command argument, possibly ""
+---@param run fun(name: string)
+local function with_brain(name, run)
+  if name ~= "" then
+    return run(name)
+  end
+  brain.pick(function(picked)
+    run(picked.name)
+  end)
+end
+
 --- Complete engram field names of the current buffer's brain.
 ---@param lead string Typed so far
 ---@return string[]
@@ -44,18 +57,22 @@ function M.create()
   end, { nargs = "+", complete = "dir", desc = "Register a folder as a brain" })
 
   create("MiaBrainDeregister", function(cmd)
-    if brain.deregister(cmd.args) then
-      vim.notify(("memoria: deregistered brain '%s'"):format(cmd.args))
-    end
-  end, { nargs = 1, complete = complete_brains, desc = "Remove a brain from the registry" })
+    with_brain(cmd.args, function(name)
+      if brain.deregister(name) then
+        vim.notify(("memoria: deregistered brain '%s'"):format(name))
+      end
+    end)
+  end, { nargs = "?", complete = complete_brains, desc = "Remove a brain from the registry" })
 
   create("MiaBrainList", brain.print_list, { nargs = 0, desc = "List registered brains" })
 
   create("MiaBrainSwitch", function(cmd)
-    if brain.switch(cmd.args) then
-      vim.notify(("memoria: active brain '%s'"):format(cmd.args))
-    end
-  end, { nargs = 1, complete = complete_brains, desc = "Set the active brain" })
+    with_brain(cmd.args, function(name)
+      if brain.switch(name) then
+        vim.notify(("memoria: active brain '%s'"):format(name))
+      end
+    end)
+  end, { nargs = "?", complete = complete_brains, desc = "Set the active brain" })
 
   create("MiaBrainConfig", function(cmd)
     brain.open_config(cmd.fargs[1])
