@@ -32,11 +32,26 @@ M.syntax = {
   ---@type fun(prefix: string, marker: string?, text: string): string
   format_list_item = wrap("syntax", "format_list_item"),
 
+  ---@type fun(line: string, markers: { not_done: string[], done: string[] }?): "not_done"|"done"|nil
+  parse_checkbox = wrap("syntax", "parse_checkbox"),
+
   ---@type fun(lines: string[]): table<string, string|table>?, integer?, string?
   parse_frontmatter = wrap("syntax", "parse_frontmatter"),
+
+  ---@type fun(line: string): integer?, string?
+  parse_heading = wrap("syntax", "parse_heading"),
+
+  ---@type fun(content: string): { text: string, path: string, col: integer }[]
+  parse_links = wrap("syntax", "parse_links"),
+
+  ---@type fun(line: string): string?, string?, string?
+  parse_list_item = wrap("syntax", "parse_list_item"),
 }
 
 M.section = {
+  ---@type fun(lines: string[], name: string): string[]?
+  get = wrap("section", "get"),
+
   ---@type fun(lines: string[], name: string, body: string[], opts: { at?: integer }?): string[]
   set = wrap("section", "set"),
 }

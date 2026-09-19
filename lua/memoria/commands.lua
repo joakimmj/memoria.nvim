@@ -1,8 +1,12 @@
 -- The :Mia* user commands, created by setup() unless `add_commands` is off.
 local M = {}
 
+local atlas = require("memoria.modules.atlas")
 local brain = require("memoria.modules.brain")
+local config = require("memoria.config")
 local engram = require("memoria.modules.engram")
+local synapse = require("memoria.modules.synapse")
+local synapse_lib = require("memoria.lib.synapse")
 
 --- Complete brain names.
 ---@param lead string Typed so far
@@ -11,6 +15,21 @@ local function complete_brains(lead)
   return vim.tbl_filter(function(name)
     return vim.startswith(name, lead)
   end, brain.names())
+end
+
+--- Complete engram field names of the current buffer's brain.
+---@param lead string Typed so far
+---@return string[]
+local function complete_engram_fields(lead)
+  local current = brain.current()
+  if not current then
+    return {}
+  end
+
+  local fields = config.load_brain_config(current.location).synapses
+  return vim.tbl_filter(function(name)
+    return vim.startswith(name, lead)
+  end, synapse_lib.field_names(fields, "engram"))
 end
 
 --- Create every command. Safe to call again.
@@ -45,6 +64,14 @@ function M.create()
   create("MiaEngramAdd", function(cmd)
     engram.add_engram(cmd.fargs[1])
   end, { nargs = "?", complete = complete_brains, desc = "Create an engram" })
+
+  create("MiaSynapseAdd", function(cmd)
+    synapse.add_synapse({ field = cmd.fargs[1] })
+  end, { nargs = "?", complete = complete_engram_fields, desc = "Link the current engram to another" })
+
+  create("MiaAtlasRebuild", function(cmd)
+    atlas.rebuild_atlas(cmd.fargs[1], { fix = cmd.bang })
+  end, { nargs = "?", bang = true, complete = complete_brains, desc = "Rebuild the atlas and report problems" })
 end
 
 return M

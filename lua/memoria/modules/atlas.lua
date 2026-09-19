@@ -1,0 +1,457 @@
+-- The atlas: a brain's derived index in `.mia_atlas.json`, rebuildable from
+-- its engrams at any time. See ARCHITECTURE.md Part 3 §7.
+local M = {}
+
+local brain = require("memoria.modules.brain")
+local config = require("memoria.config")
+local file = require("memoria.lib.file")
+local json = require("memoria.lib.json")
+local md_drafting = require("memoria.lib.md-drafting")
+local synapse = require("memoria.lib.synapse")
+
+---@class memoria.AtlasEngram
+---@field title string First heading, or the filename's stem
+---@field synapses table<string, string[]> Linked filenames by field
+---@field links string[] Engrams linked from the body
+---@field error? string Why the frontmatter could not be read
+---@field modified string File mtime, ISO 8601 UTC
+---@field hash string Content hash
+---@field [string] any Concept fields, each a list of values
+
+---@class memoria.AtlasTask
+---@field engram string Filename
+---@field line integer 1-indexed row
+---@field text string Task text, marker left out
+
+---@class memoria.Atlas
+---@field config string Fingerprint of the config the entries were parsed with
+---@field engrams table<string, memoria.AtlasEngram> By filename
+---@field backlinks table<string, string[]> Filename to the engrams linking it
+---@field concepts table<string, string[]> Concept name to the engrams naming it
+---@field tasks { not_done: memoria.AtlasTask[], done: memoria.AtlasTask[] }
+
+---@class memoria.AtlasProblem
+---@field engram string Filename
+---@field text string What is wrong
+---@field needle? string Text on the offending line, to find its row
+---@field repair? { source: string, target: string, field: string } Missing inverse to write
+
+-- Entry keys a concept field cannot be stored under.
+local RESERVED = { title = true, synapses = true, links = true, error = true, modified = true, hash = true }
+
+--- Where a brain's atlas lives.
+---@param location string Absolute brain location
+---@return string path
+function M.path(location)
+  return location .. "/.mia_atlas.json"
+end
+
+--- An atlas with nothing in it.
+---@return memoria.Atlas
+local function empty()
+  return {
+    config = "",
+    engrams = {},
+    backlinks = {},
+    concepts = {},
+    tasks = { not_done = {}, done = {} },
+  }
+end
+
+--- A frontmatter value as a list: nil and "" are empty, a scalar is one item.
+---@param value any Frontmatter field value
+---@return string[]
+local function as_list(value)
+  if type(value) == "table" then
+    return vim.tbl_filter(function(item)
+      return type(item) == "string"
+    end, value)
+  elseif type(value) == "string" and value ~= "" then
+    return { value }
+  end
+  return {}
+end
+
+--- The engram filename a link points at, when it points at one in this brain.
+--- Brains are flat: a link with a folder in it, or a scheme, is not an engram.
+---@param path string Link destination
+---@return string? filename
+function M.engram_target(path)
+  if path:match("^%a[%w+.-]*:") then
+    return nil
+  end
+
+  local target = path:gsub("#.*$", ""):gsub("^%./", "")
+  if target:find("/", 1, true) or not target:match("%.md$") then
+    return nil
+  end
+  return target
+end
+
+--- Index one engram. Pure: lines in, entry and tasks out.
+---@param filename string e.g. "20260801_project-x.md"
+---@param lines string[] Engram lines
+---@param cfg memoria.Config Brain config
+---@return memoria.AtlasEngram entry Without `modified`/`hash`
+---@return memoria.AtlasTask[]|table tasks With a `state` each
+function M.parse_engram(filename, lines, cfg)
+  local fields, fm_end, err = md_drafting.syntax.parse_frontmatter(lines)
+  local entry = { title = (filename:gsub("%.md$", "")), synapses = {}, links = {} }
+  if err then
+    entry.error = err
+  end
+
+  for _, name in ipairs(synapse.field_names(cfg.synapses, "concept")) do
+    if not RESERVED[name] then
+      entry[name] = as_list(fields and fields[name])
+    end
+  end
+
+  -- Blanking the block's body keeps every row where it is, so task rows
+  -- stay true while nothing in the block is read as body.
+  local block = synapse.parse_synapse_block(lines)
+  local body = lines
+  if block then
+    local blanks = {}
+    for _ = 1, #md_drafting.section.get(lines, "SYNAPSES") do
+      table.insert(blanks, "")
+    end
+    body = md_drafting.section.set(lines, "SYNAPSES", blanks)
+
+    for name, values in pairs(block) do
+      entry.synapses[name] = vim.tbl_map(function(value)
+        return M.engram_target(value.path) or value.path
+      end, values)
+    end
+  end
+
+  local tasks, seen, titled = {}, {}, false
+  for row = (fm_end or 0) + 1, #body do
+    local line = body[row]
+
+    if not titled then
+      local level, text = md_drafting.syntax.parse_heading(line)
+      if level and text ~= "" then
+        entry.title, titled = text, true
+      end
+    end
+
+    for _, link in ipairs(md_drafting.syntax.parse_links(line)) do
+      local target = M.engram_target(link.path)
+      if target and not seen[target] then
+        seen[target] = true
+        table.insert(entry.links, target)
+      end
+    end
+
+    local state = md_drafting.syntax.parse_checkbox(line, cfg.engrams.task_markers)
+    if state then
+      local _, _, text = md_drafting.syntax.parse_list_item(line)
+      table.insert(tasks, { engram = filename, line = row, text = text, state = state })
+    end
+  end
+
+  return entry, tasks
+end
+
+--- The config an atlas depends on, so a change to it re-parses every engram.
+---@param cfg memoria.Config
+---@return string
+local function fingerprint(cfg)
+  return vim.fn.sha256(vim.inspect({ cfg.synapses, cfg.engrams.task_markers })):sub(1, 16)
+end
+
+--- Read a brain's atlas; a missing or unreadable one is empty.
+---@param location string Absolute brain location
+---@return memoria.Atlas
+local function read(location)
+  local path = M.path(location)
+  if vim.fn.filereadable(path) == 0 then
+    return empty()
+  end
+
+  local atlas = json.read(path)
+  if type(atlas) ~= "table" or type(atlas.engrams) ~= "table" then
+    return empty()
+  end
+  atlas.tasks = type(atlas.tasks) == "table" and atlas.tasks or {}
+  return atlas
+end
+
+--- A map for JSON: empty encodes as an object rather than a list.
+---@param map table
+---@return table
+local function object(map)
+  return next(map) == nil and vim.empty_dict() or map
+end
+
+--- Write an atlas, maps kept maps however empty.
+---@param location string Absolute brain location
+---@param atlas memoria.Atlas
+---@return boolean ok
+local function write(location, atlas)
+  local engrams = {}
+  for name, entry in pairs(atlas.engrams) do
+    engrams[name] = vim.tbl_extend("force", entry, { synapses = object(entry.synapses) })
+  end
+
+  local ok, err = json.write(M.path(location), {
+    config = atlas.config,
+    engrams = object(engrams),
+    backlinks = object(atlas.backlinks),
+    concepts = object(atlas.concepts),
+    tasks = atlas.tasks,
+  })
+  if not ok then
+    vim.notify("memoria: " .. err, vim.log.levels.ERROR)
+  end
+  return ok
+end
+
+--- Append to a list in a map, once.
+---@param map table<string, string[]>
+---@param key string
+---@param value string
+local function add_to(map, key, value)
+  map[key] = map[key] or {}
+  if not vim.tbl_contains(map[key], value) then
+    table.insert(map[key], value)
+  end
+end
+
+--- Recompute `backlinks` and `concepts` from the entries.
+---@param atlas memoria.Atlas
+---@param cfg memoria.Config
+local function derive(atlas, cfg)
+  atlas.backlinks, atlas.concepts = {}, {}
+  local concept_fields = synapse.field_names(cfg.synapses, "concept")
+
+  for name, entry in pairs(atlas.engrams) do
+    for _, targets in pairs(entry.synapses) do
+      for _, target in ipairs(targets) do
+        add_to(atlas.backlinks, target, name)
+      end
+    end
+    for _, target in ipairs(entry.links) do
+      add_to(atlas.backlinks, target, name)
+    end
+    for _, field in ipairs(concept_fields) do
+      for _, concept in ipairs(entry[field] or {}) do
+        add_to(atlas.concepts, concept, name)
+      end
+    end
+  end
+
+  for _, map in ipairs({ atlas.backlinks, atlas.concepts }) do
+    for _, list in pairs(map) do
+      table.sort(list)
+    end
+  end
+end
+
+--- File mtime as ISO 8601 UTC.
+---@param path string
+---@return string
+local function modified(path)
+  local stat = vim.uv.fs_stat(path)
+  return tostring(os.date("!%Y-%m-%dT%H:%M:%SZ", stat and stat.mtime.sec or 0))
+end
+
+--- Bring a brain's atlas up to date with its files: new and changed engrams
+--- are parsed, vanished ones dropped, unchanged ones kept as they are. Written
+--- only when something changed.
+---@param target memoria.Brain
+---@param opts? { full?: boolean } full: parse every engram, as if no atlas existed
+---@return memoria.Atlas? atlas Nil when the brain's folder is missing
+function M.refresh(target, opts)
+  opts = opts or {}
+  if vim.fn.isdirectory(target.location) == 0 then
+    vim.notify(("memoria: (%s) missing folder %s"):format(target.name, target.location), vim.log.levels.ERROR)
+    return nil
+  end
+
+  local cfg = config.load_brain_config(target.location)
+  local old = opts.full and empty() or read(target.location)
+  local atlas = empty()
+  atlas.config = fingerprint(cfg)
+  local stale = atlas.config ~= old.config
+  local changed = stale or vim.fn.filereadable(M.path(target.location)) == 0
+
+  local parsed = {}
+  for name, kind in vim.fs.dir(target.location) do
+    if kind == "file" and name:match("%.md$") then
+      local path = target.location .. "/" .. name
+      local ok, lines = pcall(vim.fn.readfile, path)
+      if ok then
+        local hash = vim.fn.sha256(table.concat(lines, "\n")):sub(1, 16)
+        local previous = old.engrams[name]
+        if previous and previous.hash == hash and not stale then
+          atlas.engrams[name] = previous
+        else
+          local entry, tasks = M.parse_engram(name, lines, cfg)
+          entry.hash, entry.modified = hash, modified(path)
+          atlas.engrams[name], parsed[name] = entry, tasks
+          changed = true
+        end
+      end
+    end
+  end
+
+  for name in pairs(old.engrams) do
+    changed = changed or atlas.engrams[name] == nil
+  end
+  if not changed then
+    return old
+  end
+
+  -- Tasks of kept engrams carry over; re-parsed ones bring their own.
+  for state, tasks in pairs(old.tasks) do
+    for _, task in ipairs(tasks) do
+      if atlas.engrams[task.engram] and not parsed[task.engram] then
+        atlas.tasks[state] = atlas.tasks[state] or {}
+        table.insert(atlas.tasks[state], task)
+      end
+    end
+  end
+  for _, tasks in pairs(parsed) do
+    for _, task in ipairs(tasks) do
+      atlas.tasks[task.state] = atlas.tasks[task.state] or {}
+      table.insert(atlas.tasks[task.state], { engram = task.engram, line = task.line, text = task.text })
+    end
+  end
+  for _, tasks in pairs(atlas.tasks) do
+    table.sort(tasks, function(a, b)
+      return a.engram == b.engram and a.line < b.line or a.engram < b.engram
+    end)
+  end
+
+  derive(atlas, cfg)
+  write(target.location, atlas)
+  return atlas
+end
+
+--- Everything wrong with a brain's links, in filename order.
+---@param atlas memoria.Atlas
+---@param cfg memoria.Config Brain config
+---@return memoria.AtlasProblem[]
+function M.check(atlas, cfg)
+  local problems = {}
+  local names = vim.tbl_keys(atlas.engrams)
+  table.sort(names)
+
+  for _, name in ipairs(names) do
+    local entry = atlas.engrams[name]
+    if entry.error then
+      table.insert(problems, { engram = name, text = "unreadable frontmatter: " .. entry.error })
+    end
+
+    local fields = vim.tbl_keys(entry.synapses)
+    table.sort(fields)
+    for _, field in ipairs(fields) do
+      local needle = ("**%s:**"):format(field)
+      local inverse = (cfg.synapses[field] or {}).inverse
+      local inverse_field = inverse and cfg.synapses[inverse]
+      if not (inverse_field and inverse_field.target == "engram") then
+        inverse = nil
+      end
+
+      for _, target in ipairs(entry.synapses[field]) do
+        local linked = atlas.engrams[target]
+        if not linked then
+          table.insert(
+            problems,
+            { engram = name, needle = needle, text = ("broken synapse: %s → %s"):format(field, target) }
+          )
+        elseif inverse and not vim.tbl_contains(linked.synapses[inverse] or {}, name) then
+          table.insert(problems, {
+            engram = name,
+            needle = needle,
+            text = ("missing inverse: %s has no %s → %s"):format(target, inverse, name),
+            repair = { source = name, target = target, field = field },
+          })
+        end
+      end
+    end
+
+    for _, target in ipairs(entry.links) do
+      if not atlas.engrams[target] then
+        table.insert(problems, { engram = name, needle = "](" .. target, text = "broken link: " .. target })
+      end
+    end
+  end
+
+  return problems
+end
+
+--- Write every missing inverse, and regenerate every existing SYNAPSES block
+--- from config so fields added since it was written get their line.
+---@param target memoria.Brain
+---@param problems memoria.AtlasProblem[]
+local function fix(target, problems)
+  local synapse_module = require("memoria.modules.synapse")
+  for _, problem in ipairs(problems) do
+    local repair = problem.repair
+    if repair then
+      synapse_module.connect(target, repair.source, repair.target, repair.field)
+    end
+  end
+
+  local cfg = config.load_brain_config(target.location)
+  for name, kind in vim.fs.dir(target.location) do
+    if kind == "file" and name:match("%.md$") then
+      local path = target.location .. "/" .. name
+      local lines = file.read_lines(path)
+      if lines and synapse.parse_synapse_block(lines) then
+        local updated = synapse.update(lines, cfg.synapses, function() end)
+        if updated and not vim.deep_equal(updated, lines) then
+          file.write_lines(path, updated)
+        end
+      end
+    end
+  end
+end
+
+--- Rebuild a brain's atlas from scratch and report what is wrong in the
+--- quickfix list.
+---@param brain_name? string Default: resolved (see brain.resolve)
+---@param opts? { fix?: boolean } fix: write missing inverses and backfill blocks first
+function M.rebuild_atlas(brain_name, opts)
+  opts = opts or {}
+
+  brain.resolve(brain_name, function(target)
+    local atlas = M.refresh(target, { full = true })
+    if not atlas then
+      return
+    end
+
+    local cfg = config.load_brain_config(target.location)
+    if opts.fix then
+      fix(target, M.check(atlas, cfg))
+      atlas = M.refresh(target) --[[@as memoria.Atlas]]
+    end
+
+    local problems = M.check(atlas, cfg)
+    local items = {}
+    for _, problem in ipairs(problems) do
+      local path = target.location .. "/" .. problem.engram
+      local row = 1
+      if problem.needle then
+        for index, line in ipairs(file.read_lines(path) or {}) do
+          if line:find(problem.needle, 1, true) then
+            row = index
+            break
+          end
+        end
+      end
+      table.insert(items, { filename = path, lnum = row, text = problem.text })
+    end
+
+    vim.fn.setqflist({}, " ", { title = ("memoria: (%s) atlas"):format(target.name), items = items })
+    vim.notify(("memoria: (%s) %d engrams, %d problems"):format(target.name, vim.tbl_count(atlas.engrams), #problems))
+    if #problems > 0 then
+      vim.cmd.copen()
+    end
+  end)
+end
+
+return M

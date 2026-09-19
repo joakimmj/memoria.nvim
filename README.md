@@ -17,6 +17,11 @@ Full reference: `:help memoria`.
 - **Brains:** Register any folder as a brain, list them, switch between them.
 - **Engrams:** Create a note with a dated or plain filename, a generated
   frontmatter and synapse header, and your own content template.
+- **Synapses:** Link two notes with one command; the inverse link (`up` ↔
+  `down`) is written on the other note too.
+- **Atlas:** A derived index of every brain — titles, links, backlinks, tags,
+  tasks — kept up to date on its own and rebuildable at any time, with a
+  consistency report of broken links and one-sided synapses.
 - **Per-brain config:** Override any setting for one brain in its
   `.mia_dna.json`.
 
@@ -84,14 +89,21 @@ require("memoria").setup({
     -- Prose under the generated header. %cursor% marks where typing starts;
     -- %title% and %date% are expanded.
     content_template = "# %title%\n\n%cursor%",
+
+    -- Checkbox markers the atlas indexes as tasks, by state.
+    task_markers = {
+      not_done = { "[ ]" },
+      done = { "[x]", "[X]" },
+    },
   },
 
   -- Fields on an engram: target "engram" writes a link in the SYNAPSES
   -- block, "concept" a frontmatter list. show_empty writes the field even
-  -- with no values. Both are written sorted by name.
+  -- with no values. inverse is the field kept in sync on the other engram;
+  -- list = false holds one value only. Both kinds are written sorted by name.
   synapses = {
-    up = { target = "engram", show_empty = true },
-    down = { target = "engram", show_empty = true },
+    up = { target = "engram", inverse = "down", list = true, show_empty = true },
+    down = { target = "engram", inverse = "up", list = true, show_empty = true },
     tags = { target = "concept" },
   },
 })
@@ -115,6 +127,8 @@ differs — `:MiaBrainConfig` opens it, see `:help memoria-mia_dna.json`:
 :MiaBrainAdd ~/notes/work
 :MiaBrainSwitch work
 :MiaEngramAdd
+:MiaSynapseAdd up
+:MiaAtlasRebuild
 :MiaBrainConfig
 ```
 

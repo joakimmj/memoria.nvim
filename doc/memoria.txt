@@ -11,8 +11,10 @@ CONTENTS                                                *memoria-contents*
     3. Configuration .......................... |memoria-config|
     4. Brains ................................. |memoria-brains|
     5. Engrams ................................ |memoria-engrams|
-    6. Commands ............................... |memoria-commands|
-    7. API .................................... |memoria-api|
+    6. Synapses ............................... |memoria-synapses|
+    7. Atlas .................................. |memoria-atlas|
+    8. Commands ............................... |memoria-commands|
+    9. API .................................... |memoria-api|
 
 ==============================================================================
 1. INTRODUCTION                                     *memoria-introduction*
@@ -59,15 +61,22 @@ Every value below is the default: >lua
         -- Prose under the generated header. %cursor% marks where typing
         -- starts; %title% and %date% are expanded.
         content_template = "# %title%\n\n%cursor%",
+        -- Checkbox markers the atlas indexes, by state. Replaces the
+        -- default rather than adding to it.
+        task_markers = {
+          not_done = { "[ ]" },
+          done = { "[x]", "[X]" },
+        },
       },
 
       -- Engram fields go in the SYNAPSES block, concept fields in
       -- frontmatter. Both are written sorted by name.
       synapses = {
         -- target: "engram" or "concept". show_empty writes the field
-        -- even with no values.
-        up = { target = "engram", show_empty = true },
-        down = { target = "engram", show_empty = true },
+        -- even with no values. inverse: the engram field kept in sync on
+        -- the other side. list = false: one value, replaced on add.
+        up = { target = "engram", inverse = "down", list = true, show_empty = true },
+        down = { target = "engram", inverse = "up", list = true, show_empty = true },
         tags = { target = "concept" },
       },
     })
@@ -139,7 +148,49 @@ the header from the template, and is left out with the header.
 The buffer opens with the cursor at %cursor%.
 
 ==============================================================================
-6. COMMANDS                                             *memoria-commands*
+6. SYNAPSES                                             *memoria-synapses*
+
+|:MiaSynapseAdd| links the current engram to another through an engram field,
+and writes the field's `inverse` on the other one: >markdown
+
+    <!-- SYNAPSES -->
+    - **down:**
+    - **up:** [20260801_project-x](20260801_project-x.md)
+    ***
+    <!-- /SYNAPSES -->
+<
+Link text is the filename without `.md`. Adding a link that is already there
+changes nothing, so adding it again repairs a synapse with only one side. A
+field with `list = false` gives up its old value, and that engram loses its
+inverse back. A field without an `inverse` is written on one side only.
+
+A field line the config does not name, e.g. one added by hand, is kept.
+Frontmatter that cannot be read stops the write, and neither file changes.
+An engram open in a buffer is written through the buffer and saved.
+
+==============================================================================
+7. ATLAS                                                   *memoria-atlas*
+
+Each brain keeps a derived index in `.mia_atlas.json`: per engram its title,
+synapses, linked engrams, concept fields (e.g. `tags`) and tasks, plus
+backlinks and which engrams name each concept. It can be deleted at any time.
+
+The atlas brings itself up to date whenever memoria reads it: new and changed
+engrams are parsed again, deleted ones dropped. Edits made outside Neovim are
+picked up the same way.
+
+|:MiaAtlasRebuild| builds it from scratch and puts what is wrong in the
+quickfix list:
+
+- a synapse or link to an engram that does not exist;
+- a synapse whose inverse is missing on the other engram;
+- frontmatter that cannot be read.
+
+With `!` it first writes every missing inverse, and regenerates each existing
+SYNAPSES block from config, adding lines for fields configured since.
+
+==============================================================================
+8. COMMANDS                                             *memoria-commands*
 
 These global commands are created unless `add_commands = false`.
 
@@ -160,9 +211,15 @@ These global commands are created unless `add_commands = false`.
                             empty one when it has none
                                                              *:MiaEngramAdd*
 :MiaEngramAdd [brain]       Create an engram and open it
+                                                            *:MiaSynapseAdd*
+:MiaSynapseAdd [field]      Link the current engram to another, picked,
+                            through [field] (picked when not given)
+                                                          *:MiaAtlasRebuild*
+:MiaAtlasRebuild[!] [brain] Rebuild the atlas and list problems in the
+                            quickfix list; with ! repair what can be
 
 ==============================================================================
-7. API                                                       *memoria-api*
+9. API                                                       *memoria-api*
 
     local memoria = require("memoria")
 
@@ -192,6 +249,20 @@ These global commands are created unless `add_commands = false`.
 
     memoria.engram.add_engram({brain}, {opts})
         Create an engram and open it. {opts}.title seeds the title prompt.
+
+    memoria.synapse.add_synapse({opts})
+        Link an engram to another. {opts}.source (path, default: current
+        buffer), {opts}.target (filename) and {opts}.field are asked for
+        when left out.
+    memoria.synapse.connect({brain}, {source}, {target}, {field})
+        Link two engrams by filename, both sides. Returns true on success.
+
+    memoria.atlas.refresh({brain}, {opts})
+        Bring the brain's atlas up to date and return it. {opts}.full
+        parses every engram again.
+    memoria.atlas.rebuild_atlas({brain}, {opts})
+        Rebuild and report into the quickfix list. {opts}.fix repairs
+        missing inverses and backfills SYNAPSES blocks first.
 
 A brain is `{ name, location }`.
 

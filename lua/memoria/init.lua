@@ -3,8 +3,10 @@ local M = {}
 local config = require("memoria.config")
 local md_drafting = require("memoria.lib.md-drafting")
 
+M.atlas = require("memoria.modules.atlas")
 M.brain = require("memoria.modules.brain")
 M.engram = require("memoria.modules.engram")
+M.synapse = require("memoria.modules.synapse")
 
 --- Check the dependency, store options and create commands.
 ---@param opts? table Options, see |memoria-config|

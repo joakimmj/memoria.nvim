@@ -51,6 +51,7 @@ vim.env.XDG_DATA_HOME = scratch .. "/data"
 -- Before anything memoria is required: whether md-drafting is already loaded.
 local loaded_before = package.loaded["md-drafting"] ~= nil
 
+local atlas = require("memoria.modules.atlas")
 local brain = require("memoria.modules.brain")
 local config = require("memoria.config")
 local md_drafting = require("memoria.lib.md-drafting")
@@ -58,6 +59,7 @@ local date = require("memoria.lib.date")
 local engram = require("memoria.modules.engram")
 local json = require("memoria.lib.json")
 local synapse = require("memoria.lib.synapse")
+local synapse_module = require("memoria.modules.synapse")
 
 local failures = 0
 local checks = 0
@@ -450,6 +452,285 @@ check("add_engram prompt names the brain", prompts[1], "(prompted) Engram title:
 engram.add_engram("prompted")
 local taken = engram.filename(config.get(), "prompt_test")
 check("collision re-prompt names the brain", prompts[3], ("(prompted) %s exists, edit title: "):format(taken))
+
+-- lib: synapse, reading
+
+local block_lines = {
+  "---",
+  "tags: []",
+  "---",
+  "<!-- SYNAPSES -->",
+  "- **down:** [a](a.md), [b](b.md)",
+  "- [ ] **up:** [c](c.md)",
+  "stray prose",
+  "- **related:**",
+  "***",
+  "<!-- /SYNAPSES -->",
+  "# T",
+}
+local parsed_block = synapse.parse_synapse_block(block_lines) --[[@as table<string, memoria.SynapseLink[]> ]]
+
+check("parse_synapse_block, no block", synapse.parse_synapse_block({ "# T" }), nil)
+check(
+  "parse_synapse_block, empty block",
+  synapse.parse_synapse_block({ "<!-- SYNAPSES -->", "<!-- /SYNAPSES -->" }),
+  {}
+)
+check("parse_synapse_block, fields, checkbox ignored, stray lines skipped", parsed_block, {
+  down = { { title = "a", path = "a.md" }, { title = "b", path = "b.md" } },
+  up = { { title = "c", path = "c.md" } },
+  related = {},
+})
+check(
+  "write_synapse_block, unconfigured fields kept, sorted with the rest",
+  synapse.write_synapse_block(block_lines, { synapses = parsed_block }, config.defaults.synapses),
+  {
+    "---",
+    "tags: []",
+    "---",
+    "<!-- SYNAPSES -->",
+    "- **down:** [a](a.md), [b](b.md)",
+    "- **related:**",
+    "- **up:** [c](c.md)",
+    "***",
+    "<!-- /SYNAPSES -->",
+    "# T",
+  }
+)
+check(
+  "parse_synapse_block, round-trips write_synapse_block",
+  synapse.parse_synapse_block(
+    synapse.write_synapse_block({}, { synapses = parsed_block }, config.defaults.synapses) --[[@as string[] ]]
+  ),
+  parsed_block
+)
+check("link, stem as text", synapse.link("20260801_x.md"), { title = "20260801_x", path = "20260801_x.md" })
+
+-- modules: atlas, parsing
+
+check("engram_target, bare filename", atlas.engram_target("a.md"), "a.md")
+check("engram_target, ./ and anchor stripped", atlas.engram_target("./a.md#top"), "a.md")
+check("engram_target, URL is not an engram", atlas.engram_target("https://x.org/a.md"), nil)
+check("engram_target, folder is not in a flat brain", atlas.engram_target("../a.md"), nil)
+check("engram_target, not markdown", atlas.engram_target("a.png"), nil)
+
+local engram_lines = {
+  "---",
+  "tags: java",
+  "---",
+  "<!-- SYNAPSES -->",
+  "- **up:** [p](p.md)",
+  "- [ ] **down:**",
+  "***",
+  "<!-- /SYNAPSES -->",
+  "",
+  "# Project X",
+  "",
+  "See [q](q.md), [site](https://example.com) and [q again](./q.md#top).",
+  "- [ ] open task",
+  "- [x] done task",
+  "- plain item",
+}
+local entry, tasks = atlas.parse_engram("x.md", engram_lines, config.get())
+check("parse_engram, entry", entry, {
+  title = "Project X",
+  tags = { "java" },
+  synapses = { up = { "p.md" }, down = {} },
+  links = { "q.md" },
+})
+check("parse_engram, tasks outside the block", tasks, {
+  { engram = "x.md", line = 13, text = "open task", state = "not_done" },
+  { engram = "x.md", line = 14, text = "done task", state = "done" },
+})
+check("parse_engram, title falls back to the stem", atlas.parse_engram("y.md", { "text" }, config.get()).title, "y")
+check(
+  "parse_engram, empty frontmatter field is an empty list",
+  atlas.parse_engram("y.md", { "---", "tags:", "---" }, config.get()).tags,
+  {}
+)
+check(
+  "parse_engram, unreadable frontmatter noted",
+  atlas.parse_engram("y.md", unreadable, config.get()).error ~= nil,
+  true
+)
+
+-- modules: synapse
+
+local selects = {}
+local choices = {}
+---@diagnostic disable-next-line: duplicate-set-field
+vim.ui.select = function(items, opts, on_choice)
+  local labels = vim.tbl_map(opts.format_item or tostring, items)
+  table.insert(selects, { prompt = opts.prompt, labels = labels })
+  on_choice(table.remove(choices, 1))
+end
+
+local graph = brain.add(scratch .. "/graph", "graph") --[[@as memoria.Brain]]
+local function engram_path(name)
+  return graph.location .. "/" .. name
+end
+local function write_engram(name, body)
+  vim.fn.writefile(vim.list_extend(engram.header(config.get()), body), engram_path(name))
+end
+local function block_of(name)
+  return synapse.parse_synapse_block(vim.fn.readfile(engram_path(name)))
+end
+local function set_dna(value)
+  json.write(config.brain_config_path(graph.location), value)
+end
+
+write_engram("a.md", { "", "# A" })
+write_engram("b.md", { "", "# B" })
+write_engram("c.md", { "", "# C" })
+
+synapse_module.add_synapse({ source = engram_path("a.md"), target = "b.md", field = "up" })
+check("add_synapse, source side", block_of("a.md").up, { { title = "b", path = "b.md" } })
+check("add_synapse, inverse side", block_of("b.md").down, { { title = "a", path = "a.md" } })
+check("add_synapse, atlas refreshed", atlas.refresh(graph).engrams["a.md"].synapses.up, { "b.md" })
+check("add_synapse, backlinks", atlas.refresh(graph).backlinks["b.md"], { "a.md" })
+
+local a_before, b_before = vim.fn.readfile(engram_path("a.md")), vim.fn.readfile(engram_path("b.md"))
+synapse_module.add_synapse({ source = engram_path("a.md"), target = "b.md", field = "up" })
+check(
+  "add_synapse, again changes nothing",
+  { vim.fn.readfile(engram_path("a.md")), vim.fn.readfile(engram_path("b.md")) },
+  { a_before, b_before }
+)
+
+check("connect, self-link refused", synapse_module.connect(graph, "a.md", "a.md", "up"), false)
+check("connect, missing target refused", synapse_module.connect(graph, "a.md", "zzz.md", "up"), false)
+check("connect, concept field refused", synapse_module.connect(graph, "a.md", "b.md", "tags"), false)
+
+notified = nil
+synapse_module.add_synapse({ source = scratch .. "/elsewhere/x.md", target = "b.md", field = "up" })
+check("add_synapse, outside a brain refused", notified, "memoria: not an engram in a registered brain")
+
+choices = { "down", "c.md" }
+selects = {}
+synapse_module.add_synapse({ source = engram_path("a.md") })
+check("add_synapse, pickers name the brain", selects, {
+  { prompt = "(graph) Synapse field:", labels = { "down", "up" } },
+  { prompt = "(graph) down:", labels = { "B (b.md)", "C (c.md)" } },
+})
+check("add_synapse, picked", { block_of("a.md").down, block_of("c.md").up }, {
+  { { title = "c", path = "c.md" } },
+  { { title = "a", path = "a.md" } },
+})
+
+-- A healed one-sided synapse: a.up holds b, drop a from b.down by hand.
+vim.fn.writefile(
+  synapse.write_synapse_block(vim.fn.readfile(engram_path("b.md")), { synapses = {} }, config.get().synapses) --[[@as string[] ]],
+  engram_path("b.md")
+)
+synapse_module.connect(graph, "a.md", "b.md", "up")
+check("connect, heals the missing side", block_of("b.md").down, { { title = "a", path = "a.md" } })
+
+set_dna({ synapses = { up = { list = false } } })
+synapse_module.connect(graph, "a.md", "c.md", "up")
+check("connect, list = false replaces", block_of("a.md").up, { { title = "c", path = "c.md" } })
+check("connect, list = false drops the old inverse", block_of("b.md").down, {})
+check("connect, list = false writes the new inverse", block_of("c.md").down, { { title = "a", path = "a.md" } })
+
+set_dna({ synapses = { related = { target = "engram" } } })
+synapse_module.connect(graph, "a.md", "b.md", "related")
+check("connect, no inverse: one side only", { block_of("a.md").related, block_of("b.md").related }, {
+  { { title = "b", path = "b.md" } },
+  {},
+})
+vim.fn.delete(config.brain_config_path(graph.location))
+
+vim.fn.writefile(unreadable, engram_path("d.md"))
+a_before = vim.fn.readfile(engram_path("a.md"))
+check("connect, unreadable frontmatter refused", synapse_module.connect(graph, "a.md", "d.md", "down"), false)
+check("connect, nothing written when one side fails", vim.fn.readfile(engram_path("a.md")), a_before)
+vim.fn.delete(engram_path("d.md"))
+
+-- A loaded buffer is written through, keeping marks outside the change.
+vim.cmd.edit(vim.fn.fnameescape(engram_path("b.md")))
+local bufnr = vim.api.nvim_get_current_buf()
+local heading_row = #vim.api.nvim_buf_get_lines(bufnr, 0, -1, false) - 1
+local ns = vim.api.nvim_create_namespace("memoria-test")
+local mark = vim.api.nvim_buf_set_extmark(bufnr, ns, heading_row, 0, {})
+synapse_module.connect(graph, "c.md", "b.md", "down")
+check(
+  "write through buffer, buffer updated",
+  synapse.parse_synapse_block(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)).up,
+  {
+    { title = "c", path = "c.md" },
+  }
+)
+check("write through buffer, saved", vim.bo[bufnr].modified, false)
+check(
+  "write through buffer, disk matches",
+  vim.fn.readfile(engram_path("b.md")),
+  vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+)
+check("write through buffer, mark kept", vim.api.nvim_buf_get_extmark_by_id(bufnr, ns, mark, {})[1], heading_row)
+vim.cmd("enew")
+
+-- modules: atlas, storage
+
+local stored = atlas.refresh(graph) --[[@as memoria.Atlas]]
+local stored_names = vim.tbl_keys(stored.engrams)
+table.sort(stored_names)
+check("refresh, every engram", stored_names, { "a.md", "b.md", "c.md" })
+local raw = table.concat(vim.fn.readfile(atlas.path(graph.location)), "\n")
+check("refresh, empty maps stored as objects", raw:find('"concepts":{}', 1, true) ~= nil, true)
+
+local on_disk = json.read(atlas.path(graph.location))
+on_disk.engrams["a.md"].title = "sentinel"
+json.write(atlas.path(graph.location), on_disk)
+check("refresh, unchanged engram not re-parsed", atlas.refresh(graph).engrams["a.md"].title, "sentinel")
+check("refresh, full re-parses", atlas.refresh(graph, { full = true }).engrams["a.md"].title, "A")
+
+vim.fn.writefile(vim.list_extend(vim.fn.readfile(engram_path("c.md")), { "- [ ] call Alice" }), engram_path("c.md"))
+stored = atlas.refresh(graph) --[[@as memoria.Atlas]]
+check("refresh, changed engram re-parsed", #stored.tasks.not_done, 1)
+
+vim.fn.writefile({ "# E", "[gone](gone.md)" }, engram_path("e.md"))
+vim.fn.delete(engram_path("c.md"))
+stored = atlas.refresh(graph) --[[@as memoria.Atlas]]
+check("refresh, vanished engram dropped", stored.engrams["c.md"], nil)
+check("refresh, its tasks dropped", stored.tasks.not_done, {})
+
+-- modules: atlas, rebuild
+
+-- b.down loses a by hand; a.down, a.up and b.up still point at the deleted c.
+synapse_module.connect(graph, "a.md", "b.md", "up")
+vim.fn.writefile(
+  synapse.write_synapse_block(
+    vim.fn.readfile(engram_path("b.md")),
+    { synapses = { up = { { title = "c", path = "c.md" } } } },
+    config.get().synapses
+  ) --[[@as string[] ]],
+  engram_path("b.md")
+)
+
+local function quickfix()
+  return vim.tbl_map(function(item)
+    return { file = vim.fs.basename(vim.api.nvim_buf_get_name(item.bufnr)), row = item.lnum, text = item.text }
+  end, vim.fn.getqflist())
+end
+
+atlas.rebuild_atlas("graph")
+check("rebuild_atlas, problems in the quickfix list", quickfix(), {
+  { file = "a.md", row = 5, text = "broken synapse: down → c.md" },
+  { file = "a.md", row = 7, text = "broken synapse: up → c.md" },
+  { file = "a.md", row = 7, text = "missing inverse: b.md has no down → a.md" },
+  { file = "b.md", row = 6, text = "broken synapse: up → c.md" },
+  { file = "e.md", row = 2, text = "broken link: gone.md" },
+})
+check("rebuild_atlas, summary", notified, "memoria: (graph) 3 engrams, 5 problems")
+vim.cmd("cclose")
+
+set_dna({ synapses = { side = { target = "engram" } } })
+atlas.rebuild_atlas("graph", { fix = true })
+check("rebuild_atlas fix, inverse written", block_of("b.md").down, { { title = "a", path = "a.md" } })
+check("rebuild_atlas fix, new field backfilled", block_of("a.md").side, {})
+check("rebuild_atlas fix, engram without a block left alone", block_of("e.md"), nil)
+check("rebuild_atlas fix, broken links remain", #quickfix(), 4)
+vim.cmd("cclose")
+vim.fn.delete(config.brain_config_path(graph.location))
 
 vim.fn.delete(scratch, "rf")
 

@@ -1,6 +1,7 @@
 -- Creating engrams: filename, generated header, prose template.
 local M = {}
 
+local atlas = require("memoria.modules.atlas")
 local brain = require("memoria.modules.brain")
 local config = require("memoria.config")
 local date = require("memoria.lib.date")
@@ -172,6 +173,7 @@ function M.add_engram(brain_name, opts)
       vim.notify("memoria: could not write " .. path, vim.log.levels.ERROR)
       return
     end
+    atlas.refresh(target)
 
     vim.cmd.edit(vim.fn.fnameescape(path))
     vim.api.nvim_win_set_cursor(0, at)

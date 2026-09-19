@@ -12,9 +12,12 @@ local json = require("memoria.lib.json")
 ---@field date_format string Date tokens for filename and %date%
 ---@field filename memoria.FilenameConfig
 ---@field content_template string Prose written under the header
+---@field task_markers { not_done: string[], done: string[] } Checkbox markers the atlas indexes
 
 ---@class memoria.SynapseField
 ---@field target "engram"|"concept" What a value points at
+---@field inverse? string Engram field kept in sync on the target
+---@field list? boolean Whether the field holds more than one value
 ---@field show_empty? boolean Write the field even with no values
 
 ---@class memoria.Config
@@ -39,12 +42,18 @@ M.defaults = {
 
     -- Prose under the generated header. %cursor% marks where typing starts.
     content_template = "# %title%\n\n%cursor%",
+
+    -- Checkbox markers the atlas indexes, by state. Replaces, never merges.
+    task_markers = {
+      not_done = { "[ ]" },
+      done = { "[x]", "[X]" },
+    },
   },
 
   -- Engram fields go in the SYNAPSES block, concept fields in frontmatter.
   synapses = {
-    up = { target = "engram", show_empty = true },
-    down = { target = "engram", show_empty = true },
+    up = { target = "engram", inverse = "down", list = true, show_empty = true },
+    down = { target = "engram", inverse = "up", list = true, show_empty = true },
     tags = { target = "concept" },
   },
 }
