@@ -9,8 +9,18 @@ local synapse = require("memoria.lib.synapse")
 
 ---@class memoria.AddSynapseOpts
 ---@field source? string Engram path, default: the current buffer's file
----@field target? string Engram filename, default: picked
----@field field? string Engram field, default: picked
+---@field target string Engram filename
+---@field field string Engram field on the source
+
+---@class memoria.EngramLocation
+---@field brain memoria.Brain The brain holding it
+---@field filename string Its filename in that brain
+
+---@class memoria.Synapse
+---@field brain string Brain name
+---@field source string Source filename
+---@field field string Engram field written on the source
+---@field target string Target filename
 
 ---@class memoria.LoadedEngram
 ---@field path string Absolute path
@@ -34,6 +44,21 @@ local function target_of(value)
   return atlas.engram_target(value.path) or value.path
 end
 
+--- The brain an engram path belongs to. Brains are flat, so an engram is a
+--- markdown file sitting directly inside a registered one.
+---@param source string Engram path
+---@return memoria.EngramLocation? located
+---@return string? err Why it is not an engram in a brain
+function M.locate(source)
+  local path = vim.fn.fnamemodify(source, ":p")
+  local target_brain = brain.containing(path)
+
+  if not target_brain or vim.fs.dirname(path) ~= target_brain.location or not path:match("%.md$") then
+    return nil, "not an engram in a registered brain"
+  end
+  return { brain = target_brain, filename = vim.fs.basename(path) }
+end
+
 --- Put `target` in `source`'s field, and `source` in `target`'s inverse field.
 --- Values already there are left alone, so running it again writes the side
 --- that is missing and nothing else. A field with `list = false` gives up the
@@ -43,18 +68,16 @@ end
 ---@param source string Engram filename
 ---@param target string Engram filename
 ---@param field string Engram field on `source`
----@return boolean ok
+---@return boolean? ok
+---@return string? err
 function M.connect(target_brain, source, target, field)
   local fields = config.load_brain_config(target_brain.location).synapses
-  local in_brain = ("memoria: (%s) "):format(target_brain.name)
 
   if not fields[field] or fields[field].target ~= "engram" then
-    vim.notify(in_brain .. ("no engram field '%s'"):format(field), vim.log.levels.ERROR)
-    return false
+    return nil, ("no engram field '%s'"):format(field)
   end
   if source == target then
-    vim.notify(in_brain .. "an engram cannot link to itself", vim.log.levels.ERROR)
-    return false
+    return nil, "an engram cannot link to itself"
   end
 
   ---@type table<string, memoria.LoadedEngram|false>
@@ -74,8 +97,7 @@ function M.connect(target_brain, source, target, field)
 
   for _, name in ipairs({ source, target }) do
     if not load(name) then
-      vim.notify(in_brain .. "no engram " .. name, vim.log.levels.ERROR)
-      return false
+      return nil, "no engram " .. name
     end
   end
 
@@ -128,8 +150,7 @@ function M.connect(target_brain, source, target, field)
     if engram then
       local lines, err = synapse.write_synapse_block(engram.lines, engram, fields)
       if not lines then
-        vim.notify(in_brain .. ("%s: %s"):format(name, err), vim.log.levels.ERROR)
-        return false
+        return nil, ("%s: %s"):format(name, err)
       end
       if not vim.deep_equal(lines, engram.lines) then
         table.insert(writes, { path = engram.path, lines = lines })
@@ -140,91 +161,44 @@ function M.connect(target_brain, source, target, field)
   for _, write in ipairs(writes) do
     local ok, err = file.write_lines(write.path, write.lines)
     if not ok then
-      vim.notify("memoria: " .. err, vim.log.levels.ERROR)
-      return false
+      return nil, err
     end
   end
   return true
 end
 
---- Link the current engram to another through a synapse field, writing the
---- inverse on the other one. Asks for whatever `opts` leaves out.
----@param opts? memoria.AddSynapseOpts
+--- Link one engram to another through a synapse field, writing the inverse on
+--- the other one, and bring the atlas up to date. Given all of `source`,
+--- `field` and `target` it asks nothing and opens nothing; the pickers that
+--- fill them in are the view's.
+---@param opts memoria.AddSynapseOpts
+---@return memoria.Synapse? synapse What was linked
+---@return string? err
 function M.add_synapse(opts)
-  opts = opts or {}
-
-  local source = vim.fn.fnamemodify(opts.source or vim.api.nvim_buf_get_name(0), ":p")
-  local target_brain = brain.containing(source)
-  if not target_brain or vim.fs.dirname(source) ~= target_brain.location or not source:match("%.md$") then
-    vim.notify("memoria: not an engram in a registered brain", vim.log.levels.ERROR)
-    return
+  local located, err = M.locate(opts.source or vim.api.nvim_buf_get_name(0))
+  if not located then
+    return nil, err
   end
 
-  local source_name = vim.fs.basename(source)
-  local in_brain = ("(%s) "):format(target_brain.name)
-  local cfg = config.load_brain_config(target_brain.location)
-
-  ---@param field string
-  ---@param target string Engram filename
-  local function finish(field, target)
-    if M.connect(target_brain, source_name, target, field) then
-      atlas.refresh(target_brain)
-      vim.notify(("memoria: %s%s %s → %s"):format(in_brain, source_name, field, target))
-    end
+  if not opts.field or opts.field == "" then
+    return nil, "a synapse field is required"
+  end
+  if not opts.target or opts.target == "" then
+    return nil, "a target engram is required"
   end
 
-  ---@param field string
-  local function pick_target(field)
-    local target = opts.target
-    if target then
-      return finish(field, vim.fs.basename(target))
-    end
-
-    local current = atlas.refresh(target_brain)
-    if not current then
-      return
-    end
-
-    local names = vim.tbl_filter(function(name)
-      return name ~= source_name
-    end, vim.tbl_keys(current.engrams))
-    table.sort(names)
-    if #names == 0 then
-      vim.notify("memoria: " .. in_brain .. "no other engrams to link", vim.log.levels.WARN)
-      return
-    end
-
-    vim.ui.select(names, {
-      prompt = in_brain .. field .. ":",
-      format_item = function(name)
-        local title = current.engrams[name].title
-        return title == (name:gsub("%.md$", "")) and name or ("%s (%s)"):format(title, name)
-      end,
-    }, function(choice)
-      if choice then
-        finish(field, choice)
-      end
-    end)
+  local target = vim.fs.basename(opts.target)
+  local ok, connect_err = M.connect(located.brain, located.filename, target, opts.field)
+  if not ok then
+    return nil, connect_err
   end
 
-  local fields = synapse.field_names(cfg.synapses, "engram")
-  if opts.field then
-    if not vim.tbl_contains(fields, opts.field) then
-      vim.notify(("memoria: %sno engram field '%s'"):format(in_brain, opts.field), vim.log.levels.ERROR)
-      return
-    end
-    pick_target(opts.field)
-  elseif #fields == 0 then
-    vim.notify("memoria: " .. in_brain .. "no engram fields configured", vim.log.levels.WARN)
-  elseif #fields == 1 then
-    pick_target(fields[1])
-  else
-    vim.ui.select(fields, { prompt = in_brain .. "Synapse field:" }, function(choice)
-      if choice then
-        pick_target(choice)
-      end
-    end)
+  local _, refresh_err = atlas.refresh(located.brain)
+  if refresh_err then
+    return nil, refresh_err
   end
+
+  return { brain = located.brain.name, source = located.filename, field = opts.field, target = target }
 end
 
 return M

@@ -20,7 +20,8 @@ function M.registry_path()
 end
 
 --- Read the registry; missing file is empty.
----@return memoria.Registry
+---@return memoria.Registry registry Empty when it could not be read
+---@return string? err Why it could not be read
 local function read()
   local path = M.registry_path()
   if vim.fn.filereadable(path) == 0 then
@@ -29,22 +30,22 @@ local function read()
 
   local registry, err = json.read(path)
   if type(registry) ~= "table" then
-    vim.notify(("memoria: cannot read %s: %s"):format(path, err or "not a JSON object"), vim.log.levels.ERROR)
-    return {}
+    return {}, ("cannot read %s: %s"):format(path, err or "not a JSON object")
   end
   return registry
 end
 
 --- Write the registry.
 ---@param registry memoria.Registry
----@return boolean ok
+---@return boolean? ok
+---@return string? err Why it could not be written
 local function write(registry)
   -- An empty table encodes as a list; the registry is an object.
   local ok, err = json.write(M.registry_path(), vim.tbl_isempty(registry) and vim.empty_dict() or registry)
   if not ok then
-    vim.notify("memoria: " .. err, vim.log.levels.ERROR)
+    return nil, err
   end
-  return ok
+  return true
 end
 
 --- Absolute path, no trailing separator.
@@ -85,37 +86,43 @@ end
 --- Register a folder as a brain, creating it if missing.
 ---@param path string Folder path
 ---@param name? string Default: folder name
----@return memoria.Brain?
+---@return memoria.Brain? brain
+---@return string? err Why it could not be registered
 function M.add(path, name)
   local location = absolute(path)
   name = name or vim.fs.basename(location)
 
-  local registry = read()
+  local registry, err = read()
+  if err then
+    return nil, err
+  end
   if registry[name] then
-    vim.notify(("memoria: brain '%s' already exists"):format(name), vim.log.levels.ERROR)
-    return nil
+    return nil, ("brain '%s' already exists"):format(name)
   end
 
   if vim.fn.mkdir(location, "p") == 0 and vim.fn.isdirectory(location) == 0 then
-    vim.notify("memoria: cannot create " .. location, vim.log.levels.ERROR)
-    return nil
+    return nil, "cannot create " .. location
   end
 
   registry[name] = { location = location }
-  if not write(registry) then
-    return nil
+  local ok, write_err = write(registry)
+  if not ok then
+    return nil, write_err
   end
   return { name = name, location = location }
 end
 
 --- Remove a brain from the registry. Files are never touched.
 ---@param name string
----@return boolean ok
+---@return boolean? ok
+---@return string? err
 function M.deregister(name)
-  local registry = read()
+  local registry, err = read()
+  if err then
+    return nil, err
+  end
   if not registry[name] then
-    vim.notify(("memoria: no brain '%s'"):format(name), vim.log.levels.ERROR)
-    return false
+    return nil, ("no brain '%s'"):format(name)
   end
 
   registry[name] = nil
@@ -127,15 +134,16 @@ end
 
 --- Set the active brain for this session.
 ---@param name string
----@return boolean ok
+---@return memoria.Brain? brain The now-active brain
+---@return string? err
 function M.switch(name)
-  if not M.get(name) then
-    vim.notify(("memoria: no brain '%s'"):format(name), vim.log.levels.ERROR)
-    return false
+  local brain = M.get(name)
+  if not brain then
+    return nil, ("no brain '%s'"):format(name)
   end
 
   active = name
-  return true
+  return brain
 end
 
 --- The active brain, if one is set and still registered.
@@ -176,93 +184,49 @@ function M.current()
   end
 end
 
---- Pick a registered brain. The one picker that does not name a brain, since
---- it is what decides one.
----@param callback fun(brain: memoria.Brain) Called once picked
-function M.pick(callback)
-  local names = M.names()
-  if #names == 0 then
-    vim.notify("memoria: no brains registered; add one with :MiaBrainAdd", vim.log.levels.WARN)
-    return
-  end
-
-  vim.ui.select(names, { prompt = "Brain:" }, function(choice)
-    if choice then
-      callback(M.get(choice) --[[@as memoria.Brain]])
-    end
-  end)
-end
-
---- Resolve a brain: by name, by current buffer, active, then picker.
----@param name? string Brain name
----@param callback fun(brain: memoria.Brain) Called once resolved
-function M.resolve(name, callback)
+--- The brain to act in: the one named, the one holding the current buffer, the
+--- active one, or the only one registered (|memoria-brains|). The last step,
+--- the picker, is the view's; a name that is not registered is an error and
+--- never reaches it.
+---@param name? string Brain name, "" or nil to resolve
+---@return memoria.Brain? brain
+---@return string? err Why none resolved
+function M.resolve(name)
   if name and name ~= "" then
     local brain = M.get(name)
     if not brain then
-      vim.notify(("memoria: no brain '%s'"):format(name), vim.log.levels.ERROR)
-      return
+      return nil, ("no brain '%s'"):format(name)
     end
-    return callback(brain)
+    return brain
   end
 
-  local brain = M.containing(vim.api.nvim_buf_get_name(0)) or M.active()
+  local brain = M.current()
   if brain then
-    return callback(brain)
+    return brain
   end
 
-  M.pick(callback)
+  local names = M.names()
+  if #names == 1 then
+    return M.get(names[1])
+  elseif #names == 0 then
+    return nil, "no brains registered"
+  end
+  return nil, ("no brain resolved; name one (%s)"):format(table.concat(names, ", "))
 end
 
---- Open a brain's own config, creating an empty one when it has none. What the
---- file may hold is |memoria-mia_dna.json|; only what differs belongs in it.
----@param name? string Brain name, default: resolved (see M.resolve)
-function M.open_config(name)
-  M.resolve(name, function(brain)
-    local path = config.brain_config_path(brain.location)
+--- A brain's own config, written as `{}` when it has none. What the file may
+--- hold is |memoria-mia_dna.json|; only what differs belongs in it. Opening it
+--- is the view's.
+---@param target memoria.Brain
+---@return string? path
+---@return string? err
+function M.ensure_config(target)
+  local path = config.brain_config_path(target.location)
 
-    if vim.fn.filereadable(path) == 0 and vim.fn.writefile({ "{}" }, path) ~= 0 then
-      vim.notify("memoria: could not write " .. path, vim.log.levels.ERROR)
-      return
-    end
-
-    vim.cmd.edit(vim.fn.fnameescape(path))
-  end)
-end
-
---- Echo every brain: "*" the active one, ">" the one holding the current
---- buffer, then name, location, "(config)" when it has a `.mia_dna.json`, and
---- ⚠ when the folder is missing.
-function M.print_list()
-  local brains = M.list()
-  if #brains == 0 then
-    vim.notify("memoria: no brains registered", vim.log.levels.INFO)
-    return
+  if vim.fn.filereadable(path) == 0 and vim.fn.writefile({ "{}" }, path) ~= 0 then
+    return nil, "could not write " .. path
   end
-
-  local width = 0
-  for _, brain in ipairs(brains) do
-    width = math.max(width, #brain.name)
-  end
-
-  local holding = M.containing(vim.api.nvim_buf_get_name(0))
-
-  local chunks = {}
-  for index, brain in ipairs(brains) do
-    local marker = (holding and brain.name == holding.name and ">" or " ") .. (brain.name == active and "* " or "  ")
-    table.insert(chunks, { marker .. brain.name .. string.rep(" ", width - #brain.name + 2) })
-    table.insert(chunks, { brain.location })
-    if vim.fn.filereadable(config.brain_config_path(brain.location)) == 1 then
-      table.insert(chunks, { "  (config)", "Comment" })
-    end
-    if vim.fn.isdirectory(brain.location) == 0 then
-      table.insert(chunks, { "  ⚠ missing", "WarningMsg" })
-    end
-    if index < #brains then
-      table.insert(chunks, { "\n" })
-    end
-  end
-  vim.api.nvim_echo(chunks, false, {})
+  return path
 end
 
 return M

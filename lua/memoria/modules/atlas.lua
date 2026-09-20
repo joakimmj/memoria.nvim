@@ -1,5 +1,5 @@
 -- The atlas: a brain's derived index in `.mia_atlas.json`, rebuildable from
--- its engrams at any time. See ARCHITECTURE.md Part 3 §7.
+-- its engrams at any time. See |memoria-atlas|.
 local M = {}
 
 local brain = require("memoria.modules.brain")
@@ -30,11 +30,26 @@ local synapse = require("memoria.lib.synapse")
 ---@field concepts table<string, string[]> Concept name to the engrams naming it
 ---@field tasks { not_done: memoria.AtlasTask[], done: memoria.AtlasTask[] }
 
+---@alias memoria.AtlasProblemKind
+---| "broken_synapse" # A synapse pointing at an engram that is not there
+---| "missing_inverse" # A synapse the other engram does not answer
+---| "broken_link" # A body link pointing at an engram that is not there
+---| "unreadable_frontmatter" # Frontmatter that could not be parsed
+
 ---@class memoria.AtlasProblem
 ---@field engram string Filename
----@field text string What is wrong
+---@field kind memoria.AtlasProblemKind What is wrong
+---@field text string What is wrong, in words
 ---@field needle? string Text on the offending line, to find its row
 ---@field repair? { source: string, target: string, field: string } Missing inverse to write
+
+---@class memoria.LocatedProblem : memoria.AtlasProblem
+---@field file string Absolute path
+---@field line integer 1-indexed row, 1 when no line says so
+
+---@class memoria.RebuildResult
+---@field atlas memoria.Atlas The atlas as rebuilt
+---@field problems memoria.AtlasProblem[] What is still wrong
 
 -- Entry keys a concept field cannot be stored under.
 local RESERVED = { title = true, synapses = true, links = true, error = true, modified = true, hash = true }
@@ -188,7 +203,8 @@ end
 --- Write an atlas, maps kept maps however empty.
 ---@param location string Absolute brain location
 ---@param atlas memoria.Atlas
----@return boolean ok
+---@return boolean? ok
+---@return string? err Why it could not be written
 local function write(location, atlas)
   local engrams = {}
   for name, entry in pairs(atlas.engrams) do
@@ -203,9 +219,9 @@ local function write(location, atlas)
     tasks = atlas.tasks,
   })
   if not ok then
-    vim.notify("memoria: " .. err, vim.log.levels.ERROR)
+    return nil, err
   end
-  return ok
+  return true
 end
 
 --- Append to a list in a map, once.
@@ -262,12 +278,12 @@ end
 --- only when something changed.
 ---@param target memoria.Brain
 ---@param opts? { full?: boolean } full: parse every engram, as if no atlas existed
----@return memoria.Atlas? atlas Nil when the brain's folder is missing
+---@return memoria.Atlas? atlas
+---@return string? err Why the brain could not be read
 function M.refresh(target, opts)
   opts = opts or {}
   if vim.fn.isdirectory(target.location) == 0 then
-    vim.notify(("memoria: (%s) missing folder %s"):format(target.name, target.location), vim.log.levels.ERROR)
-    return nil
+    return nil, "missing folder " .. target.location
   end
 
   local cfg = config.load_brain_config(target.location)
@@ -326,7 +342,10 @@ function M.refresh(target, opts)
   end
 
   derive(atlas, cfg)
-  write(target.location, atlas)
+  local ok, err = write(target.location, atlas)
+  if not ok then
+    return nil, err
+  end
   return atlas
 end
 
@@ -342,7 +361,10 @@ function M.check(atlas, cfg)
   for _, name in ipairs(names) do
     local entry = atlas.engrams[name]
     if entry.error then
-      table.insert(problems, { engram = name, text = "unreadable frontmatter: " .. entry.error })
+      table.insert(
+        problems,
+        { engram = name, kind = "unreadable_frontmatter", text = "unreadable frontmatter: " .. entry.error }
+      )
     end
 
     local fields = vim.tbl_keys(entry.synapses)
@@ -358,13 +380,16 @@ function M.check(atlas, cfg)
       for _, target in ipairs(entry.synapses[field]) do
         local linked = atlas.engrams[target]
         if not linked then
-          table.insert(
-            problems,
-            { engram = name, needle = needle, text = ("broken synapse: %s → %s"):format(field, target) }
-          )
+          table.insert(problems, {
+            engram = name,
+            kind = "broken_synapse",
+            needle = needle,
+            text = ("broken synapse: %s → %s"):format(field, target),
+          })
         elseif inverse and not vim.tbl_contains(linked.synapses[inverse] or {}, name) then
           table.insert(problems, {
             engram = name,
+            kind = "missing_inverse",
             needle = needle,
             text = ("missing inverse: %s has no %s → %s"):format(target, inverse, name),
             repair = { source = name, target = target, field = field },
@@ -375,7 +400,12 @@ function M.check(atlas, cfg)
 
     for _, target in ipairs(entry.links) do
       if not atlas.engrams[target] then
-        table.insert(problems, { engram = name, needle = "](" .. target, text = "broken link: " .. target })
+        table.insert(problems, {
+          engram = name,
+          kind = "broken_link",
+          needle = "](" .. target,
+          text = "broken link: " .. target,
+        })
       end
     end
   end
@@ -411,47 +441,63 @@ local function fix(target, problems)
   end
 end
 
---- Rebuild a brain's atlas from scratch and report what is wrong in the
---- quickfix list.
+--- Each problem with the file and row it sits on: the first line holding its
+--- `needle`, or row 1. Every engram named is read once.
+---@param target memoria.Brain
+---@param problems memoria.AtlasProblem[]
+---@return memoria.LocatedProblem[] located In the order given
+function M.locate_problems(target, problems)
+  local lines_of = {}
+  local located = {}
+
+  for _, problem in ipairs(problems) do
+    local path = target.location .. "/" .. problem.engram
+    if lines_of[path] == nil then
+      lines_of[path] = file.read_lines(path) or {}
+    end
+
+    local row = 1
+    if problem.needle then
+      for index, line in ipairs(lines_of[path]) do
+        if line:find(problem.needle, 1, true) then
+          row = index
+          break
+        end
+      end
+    end
+    table.insert(located, vim.tbl_extend("force", problem, { file = path, line = row }))
+  end
+
+  return located
+end
+
+--- Rebuild a brain's atlas from scratch and check it. Reporting is the view's
+--- (the quickfix list) and the CLI's (JSON).
 ---@param brain_name? string Default: resolved (see brain.resolve)
 ---@param opts? { fix?: boolean } fix: write missing inverses and backfill blocks first
+---@return memoria.RebuildResult? result
+---@return string? err
 function M.rebuild_atlas(brain_name, opts)
   opts = opts or {}
 
-  brain.resolve(brain_name, function(target)
-    local atlas = M.refresh(target, { full = true })
-    if not atlas then
-      return
-    end
+  local target, err = brain.resolve(brain_name)
+  if not target then
+    return nil, err
+  end
 
-    local cfg = config.load_brain_config(target.location)
-    if opts.fix then
-      fix(target, M.check(atlas, cfg))
-      atlas = M.refresh(target) --[[@as memoria.Atlas]]
-    end
+  local atlas, refresh_err = M.refresh(target, { full = true })
+  if not atlas then
+    return nil, refresh_err
+  end
 
-    local problems = M.check(atlas, cfg)
-    local items = {}
-    for _, problem in ipairs(problems) do
-      local path = target.location .. "/" .. problem.engram
-      local row = 1
-      if problem.needle then
-        for index, line in ipairs(file.read_lines(path) or {}) do
-          if line:find(problem.needle, 1, true) then
-            row = index
-            break
-          end
-        end
-      end
-      table.insert(items, { filename = path, lnum = row, text = problem.text })
-    end
+  local cfg = config.load_brain_config(target.location)
+  if opts.fix then
+    -- A repair that cannot be written stays in the problems below.
+    fix(target, M.check(atlas, cfg))
+    atlas = M.refresh(target) --[[@as memoria.Atlas]]
+  end
 
-    vim.fn.setqflist({}, " ", { title = ("memoria: (%s) atlas"):format(target.name), items = items })
-    vim.notify(("memoria: (%s) %d engrams, %d problems"):format(target.name, vim.tbl_count(atlas.engrams), #problems))
-    if #problems > 0 then
-      vim.cmd.copen()
-    end
-  end)
+  return { atlas = atlas, problems = M.check(atlas, cfg) }
 end
 
 return M

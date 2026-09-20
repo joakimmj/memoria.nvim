@@ -3,10 +3,21 @@ local M = {}
 local config = require("memoria.config")
 local md_drafting = require("memoria.lib.md-drafting")
 
-M.atlas = require("memoria.modules.atlas")
-M.brain = require("memoria.modules.brain")
-M.engram = require("memoria.modules.engram")
-M.synapse = require("memoria.modules.synapse")
+-- The interactive layer: what the :Mia* commands call, and what a keymap
+-- binds to. The headless functions behind them are under M.core.
+M.atlas = require("memoria.ui.atlas")
+M.brain = require("memoria.ui.brain")
+M.engram = require("memoria.ui.engram")
+M.synapse = require("memoria.ui.synapse")
+
+--- Every feature without its prompts, pickers and buffers: given all its
+--- arguments each one answers `result` or `nil, err`. See |memoria-api|.
+M.core = {
+  atlas = require("memoria.modules.atlas"),
+  brain = require("memoria.modules.brain"),
+  engram = require("memoria.modules.engram"),
+  synapse = require("memoria.modules.synapse"),
+}
 
 --- Check the dependency, store options and create commands.
 ---@param opts? table Options, see |memoria-config|

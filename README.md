@@ -133,4 +133,7 @@ differs — `:MiaBrainConfig` opens it, see `:help memoria-mia_dna.json`:
 ```
 
 Every command is also a Lua function, e.g.
-`require("memoria").engram.add_engram()`. See `:help memoria-api`.
+`require("memoria").engram.add_engram()` — bind it to a keymap and it behaves
+exactly like `:MiaEngramAdd`. The same feature without the prompts and the
+buffer is `require("memoria").core.engram.add_engram(brain, opts)`, which
+answers a result or `nil, err`. See `:help memoria-api`.

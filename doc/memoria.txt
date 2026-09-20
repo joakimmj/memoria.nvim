@@ -103,7 +103,8 @@ is resolved in this order:
 
     1. the brain holding the current buffer's file
     2. the active brain
-    3. a picker over registered brains
+    3. the only registered brain, when there is exactly one
+    4. a picker over registered brains
 
 So the active brain is not always the one acted on. |:MiaBrainList| marks
 both: `>` the brain holding the current buffer, which wins, and `*` the active
@@ -111,6 +112,8 @@ one. Prompts name their brain, e.g. >
 
     (work) Engram title:
 <
+A brain that *is* named must exist: an unknown name is an error, never the
+picker.
 
 ==============================================================================
 5. ENGRAMS                                               *memoria-engrams*
@@ -124,8 +127,8 @@ one. Prompts name their brain, e.g. >
 <
 The slug is lowercased, whitespace becomes `filename.separator`, and
 characters no filesystem allows (/ \ : * ? " < > |) are dropped. When the file
-already exists, or nothing usable is left, the prompt asks again with the
-title filled in.
+already exists, or nothing usable is left, |:MiaEngramAdd| asks again with the
+title filled in and the reason in the prompt.
 
 The file gets a generated header, then the content template: >markdown
 
@@ -211,7 +214,8 @@ These global commands are created unless `add_commands = false`.
 :MiaBrainConfig [brain]     Open the brain's .mia_dna.json, creating an
                             empty one when it has none
                                                              *:MiaEngramAdd*
-:MiaEngramAdd [brain]       Create an engram and open it
+:MiaEngramAdd [brain]       Ask for a title, create an engram and open it,
+                            asking again when the title cannot be a filename
                                                             *:MiaSynapseAdd*
 :MiaSynapseAdd [field]      Link the current engram to another, picked,
                             through [field] (picked when not given)
@@ -225,47 +229,106 @@ These global commands are created unless `add_commands = false`.
     local memoria = require("memoria")
 
     memoria.setup({opts})
-        Check the dependency, store options, create commands.
+        Check the dependency, store options, create commands. Returns true,
+        or nil and why not.
+
+Two layers. `memoria.{feature}` is what the |memoria-commands| call: it asks
+for what you left out, opens what needs opening, and reports what went wrong —
+bind these to a keymap. `memoria.core.{feature}` is the same feature without
+any of that: it asks nothing, opens nothing, and answers a result, or nil and
+an error naming no brain.
 
     memoria.brain.add({path}, {name})
-        Register a folder as a brain. Returns the brain, or nil.
+        Register a folder as a brain, reporting the result.
     memoria.brain.deregister({name})
-        Remove a brain from the registry.
+        Remove a brain from the registry; picked when not named.
     memoria.brain.switch({name})
-        Set the active brain.
-    memoria.brain.active()
-        The active brain, or nil.
-    memoria.brain.current()
-        The brain commands would act on, and why, or nil.
-    memoria.brain.get({name})
-        A registered brain, or nil.
-    memoria.brain.list()
-        Every brain, sorted by name.
-    memoria.brain.names()
-        Every brain name, sorted.
+        Set the active brain; picked when not named.
     memoria.brain.open_config({name})
         Open a brain's .mia_dna.json, creating "{}" when it has none.
-    memoria.brain.pick({callback})
-        Pick a registered brain and pass it to {callback}.
-    memoria.brain.resolve({name}, {callback})
-        Resolve a brain (see |memoria-brains|) and pass it to {callback}.
+    memoria.brain.print_list()
+        Echo every brain, see |:MiaBrainList|.
+    memoria.brain.pick({run})
+        Pick a registered brain and pass it to {run}.
+    memoria.brain.resolve({name}, {run})
+        Resolve a brain (see |memoria-brains|) and pass it to {run}, with the
+        picker as the last step.
+    memoria.brain.choose({name}, {run})
+        The picker straight away when {name} is empty, for choosing a brain
+        rather than acting in one.
 
     memoria.engram.add_engram({brain}, {opts})
-        Create an engram and open it. {opts}.title seeds the title prompt.
+        Ask for a title, create the engram and open it at its cursor, asking
+        again when the title cannot be a filename.
 
     memoria.synapse.add_synapse({opts})
-        Link an engram to another. {opts}.source (path, default: current
-        buffer), {opts}.target (filename) and {opts}.field are asked for
-        when left out.
-    memoria.synapse.connect({brain}, {source}, {target}, {field})
-        Link two engrams by filename, both sides. Returns true on success.
+        Link the current engram to another. {opts}.source (path, default: the
+        current buffer), {opts}.field and {opts}.target are asked for when
+        left out.
 
-    memoria.atlas.refresh({brain}, {opts})
-        Bring the brain's atlas up to date and return it. {opts}.full
-        parses every engram again.
     memoria.atlas.rebuild_atlas({brain}, {opts})
-        Rebuild and report into the quickfix list. {opts}.fix repairs
-        missing inverses and backfills SYNAPSES blocks first.
+        Rebuild and report into the quickfix list. {opts}.fix repairs missing
+        inverses and backfills SYNAPSES blocks first.
+
+Every function below answers a result, or nil and an error.
+
+    memoria.core.brain.add({path}, {name})
+        Register a folder as a brain. Returns the brain.
+    memoria.core.brain.deregister({name})
+        Remove a brain from the registry. Files are never touched.
+    memoria.core.brain.switch({name})
+        Set the active brain. Returns it.
+    memoria.core.brain.resolve({name})
+        The brain to act in, see |memoria-brains|. The picker is the view's,
+        so an unnamed brain that resolves to nothing is an error here.
+    memoria.core.brain.ensure_config({brain})
+        A brain's .mia_dna.json, written as "{}" when it has none. Returns
+        its path.
+    memoria.core.brain.active()
+        The active brain, or nil.
+    memoria.core.brain.current()
+        The brain commands would act on, and why, or nil.
+    memoria.core.brain.containing({file})
+        The brain whose folder holds {file}, or nil.
+    memoria.core.brain.get({name})
+        A registered brain, or nil.
+    memoria.core.brain.list()
+        Every brain, sorted by name.
+    memoria.core.brain.names()
+        Every brain name, sorted.
+
+    memoria.core.engram.add_engram({brain}, {opts})
+        Create an engram, opening nothing. {opts}.title is required,
+        {opts}.fields fills the frontmatter, {opts}.body lands at %cursor%.
+        Returns `{ path, cursor }`, or nil, an error, and a code:
+        "empty_slug", "collision" or "prefix" (see |memoria-engrams|).
+    memoria.core.engram.header({cfg}, {fields})
+        The generated header for a config, with {fields}' values in it.
+    memoria.core.engram.filename({cfg}, {slug}, {time})
+        The filename a slug gets under the configured prefix.
+    memoria.core.engram.slugify({title}, {separator})
+        The filename-safe slug of a title.
+
+    memoria.core.synapse.add_synapse({opts})
+        Link two engrams and refresh the atlas. {opts}.source (path),
+        {opts}.field and {opts}.target are all required. Returns what it
+        linked.
+    memoria.core.synapse.connect({brain}, {source}, {target}, {field})
+        Link two engrams by filename, both sides.
+    memoria.core.synapse.locate({path})
+        The brain and filename of an engram path, or why it is not one.
+
+    memoria.core.atlas.refresh({brain}, {opts})
+        Bring the brain's atlas up to date and return it. {opts}.full parses
+        every engram again.
+    memoria.core.atlas.rebuild_atlas({brain}, {opts})
+        Rebuild from scratch and check it. Returns `{ atlas, problems }`;
+        {opts}.fix repairs missing inverses and backfills SYNAPSES blocks
+        first.
+    memoria.core.atlas.locate_problems({brain}, {problems})
+        The same problems, each with the file and row it sits on.
+    memoria.core.atlas.check({atlas}, {cfg})
+        Everything wrong with a brain's links, each with a kind.
 
 A brain is `{ name, location }`.
 

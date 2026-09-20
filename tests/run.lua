@@ -61,6 +61,10 @@ local json = require("memoria.lib.json")
 local synapse = require("memoria.lib.synapse")
 local synapse_module = require("memoria.modules.synapse")
 
+-- The commands are the view's callers, and the assertions over prompts and
+-- pickers below go through them. Creating them again is safe.
+require("memoria.commands").create()
+
 local failures = 0
 local checks = 0
 
@@ -136,7 +140,8 @@ for _, group in ipairs({ "syntax", "section" }) do
     check(("md_drafting.%s.%s wraps a real api function"):format(group, name), type(api[group][name]), "function")
   end
 end
-for _, path in ipairs(vim.fn.glob("lua/**/*.lua", false, true)) do
+local sources = vim.fn.glob("lua/**/*.lua", false, true)
+for _, path in ipairs(sources) do
   if path ~= "lua/memoria/lib/md-drafting.lua" then
     local source = table.concat(vim.fn.readfile(path), "\n")
     check(
@@ -145,6 +150,22 @@ for _, path in ipairs(vim.fn.glob("lua/**/*.lua", false, true)) do
       true
     )
   end
+end
+
+-- The layers: the model answers, the view asks. Anything interactive under
+-- modules/ would be unreachable from the CLI, which has no editor to ask in.
+local INTERACTIVE = { "vim%.notify", "vim%.ui%.select", "vim%.fn%.input", "vim%.cmd%.edit", "setqflist" }
+for _, path in ipairs(vim.fn.glob("lua/memoria/modules/*.lua", false, true)) do
+  local source = table.concat(vim.fn.readfile(path), "\n")
+  for _, pattern in ipairs(INTERACTIVE) do
+    check(("%s does not %s"):format(path, (pattern:gsub("%%", ""))), source:find(pattern) == nil, true)
+  end
+end
+
+local headless = vim.fn.glob("lua/memoria/{modules,lib}/*.lua", false, true)
+for _, path in ipairs(headless) do
+  local source = table.concat(vim.fn.readfile(path), "\n")
+  check(path .. " does not reach into the view", source:find('require%("memoria%.ui') == nil, true)
 end
 
 -- config: merge
@@ -316,6 +337,54 @@ check("header, no engram fields: no block", header_with({ tags = { target = "con
   "---",
 })
 check("header, no fields at all: nothing", header_with({}), {})
+
+check(
+  "header, fields fill the flow list",
+  engram.header(config.get(), { tags = { "java", "streams" } })[2],
+  "tags: [java, streams]"
+)
+check("header, a scalar field value is one item", engram.header(config.get(), { tags = "java" })[2], "tags: [java]")
+check(
+  "header, a value that would read as structure is quoted",
+  engram.header(config.get(), { tags = { "a, b", "c: d", " e " } })[2],
+  'tags: ["a, b", "c: d", " e "]'
+)
+check(
+  "header, a quote in a value is escaped",
+  engram.header(config.get(), { tags = { 'say "hi"' } })[2],
+  'tags: ["say \\"hi\\""]'
+)
+check("header, unknown field refused", { engram.header(config.get(), { bogus = { "x" } }) }, {
+  nil,
+  "no concept field 'bogus'",
+})
+---@diagnostic disable-next-line: assign-type-mismatch
+check("header, a field that is not text refused", { engram.header(config.get(), { tags = { 1 } }) }, {
+  nil,
+  "field 'tags' takes strings",
+})
+
+local function with_body(prose, cursor, body)
+  local lines, at = engram.insert_body(prose, cursor, body)
+  return { lines = lines, cursor = at }
+end
+
+check("insert_body, one line at the end", with_body({ "# T", "", "" }, { 3, 0 }, "prose"), {
+  lines = { "# T", "", "prose" },
+  cursor = { 3, 5 },
+})
+check("insert_body, several lines", with_body({ "# T", "", "" }, { 3, 0 }, "one\ntwo"), {
+  lines = { "# T", "", "one", "two" },
+  cursor = { 4, 3 },
+})
+check("insert_body, mid-line keeps what follows", with_body({ "Date:  (x)" }, { 1, 6 }, "today"), {
+  lines = { "Date: today (x)" },
+  cursor = { 1, 11 },
+})
+check("insert_body, several lines mid-line", with_body({ "a b" }, { 1, 2 }, "one\ntwo"), {
+  lines = { "a one", "twob" },
+  cursor = { 2, 3 },
+})
 check(
   "write_synapse_block, custom frontmatter fields kept",
   synapse.write_synapse_block(
@@ -383,38 +452,42 @@ check(
   { name = "home", location = scratch .. "/personal" }
 )
 check("add, collision refused", brain.add(scratch .. "/other", "work"), nil)
+check("add, collision says why", select(2, brain.add(scratch .. "/other", "work")), "brain 'work' already exists")
 check("names, sorted", brain.names(), { "home", "work" })
 check("get", brain.get("home"), { name = "home", location = scratch .. "/personal" })
 check("containing, file inside", brain.containing(scratch .. "/notes/work/a.md"), brain.get("work"))
 check("containing, sibling prefix is not inside", brain.containing(scratch .. "/notes/work2/a.md"), nil)
 
 check("active, unset", brain.active(), nil)
-check("switch, unknown", brain.switch("nope"), false)
-check("switch", brain.switch("home"), true)
+check("resolve, several brains and none named", { brain.resolve() }, {
+  nil,
+  "no brain resolved; name one (home, work)",
+})
+check("switch, unknown", brain.switch("nope"), nil)
+check("switch, unknown says why", select(2, brain.switch("nope")), "no brain 'nope'")
+check("switch", brain.switch("home"), brain.get("home"))
 check("active, set", brain.active(), brain.get("home"))
 
-local resolved
-brain.resolve("work", function(b)
-  resolved = b
-end)
-check("resolve, by name", resolved, brain.get("work"))
-resolved = nil
-brain.resolve(nil, function(b)
-  resolved = b
-end)
-check("resolve, active when buffer is outside", resolved, brain.get("home"))
+check("resolve, by name", brain.resolve("work"), brain.get("work"))
+check("resolve, unknown name", brain.resolve("nope"), nil)
+check("resolve, unknown name says why", select(2, brain.resolve("nope")), "no brain 'nope'")
+check("resolve, active when buffer is outside", brain.resolve(), brain.get("home"))
+check("resolve, empty name is unnamed", brain.resolve(""), brain.get("home"))
 
 local dna = config.brain_config_path(scratch .. "/notes/work")
 check("brain_config_path", dna, scratch .. "/notes/work/.mia_dna.json")
 check("no config before open_config", vim.fn.filereadable(dna), 0)
 
-brain.open_config("work")
-check("open_config, creates an empty object", vim.fn.readfile(dna), { "{}" })
-check("open_config, opens the file", vim.api.nvim_buf_get_name(0), dna)
+local work = brain.get("work") --[[@as memoria.Brain]]
+check("ensure_config, answers the path", brain.ensure_config(work), dna)
+check("ensure_config, creates an empty object", vim.fn.readfile(dna), { "{}" })
+
+vim.cmd("MiaBrainConfig work")
+check("MiaBrainConfig, opens the file", vim.api.nvim_buf_get_name(0), dna)
 
 vim.fn.writefile({ '{ "engrams": { "date_format": "YYYY" } }' }, dna)
-brain.open_config("work")
-check("open_config, existing file kept", vim.fn.readfile(dna), { '{ "engrams": { "date_format": "YYYY" } }' })
+brain.ensure_config(work)
+check("ensure_config, existing file kept", vim.fn.readfile(dna), { '{ "engrams": { "date_format": "YYYY" } }' })
 check("open_config, override read back", config.load_brain_config(scratch .. "/notes/work").engrams.date_format, "YYYY")
 
 local function current()
@@ -430,9 +503,11 @@ check("current, falls back to the active brain", current(), { name = "home", rea
 check("deregister", brain.deregister("home"), true)
 check("deregister, active cleared", brain.active(), nil)
 check("current, nothing resolves", current(), { name = nil, reason = nil })
+check("resolve, the only brain left needs no picker", brain.resolve(), brain.get("work"))
 check("deregister, folder kept", vim.fn.isdirectory(scratch .. "/personal"), 1)
-check("deregister, unknown", brain.deregister("home"), false)
+check("deregister, unknown", brain.deregister("home"), nil)
 brain.deregister("work")
+check("resolve, none registered", { brain.resolve() }, { nil, "no brains registered" })
 check("registry is an object when empty", vim.fn.readfile(brain.registry_path())[1], "{}")
 
 -- Prompts name their brain, so the resolution in brain.resolve is visible.
@@ -446,12 +521,21 @@ vim.fn.input = function(message)
 end
 
 brain.add(scratch .. "/prompts", "prompted")
-engram.add_engram("prompted")
-check("add_engram prompt names the brain", prompts[1], "(prompted) Engram title: ")
+vim.cmd("MiaEngramAdd prompted")
+check("MiaEngramAdd prompt names the brain", prompts[1], "(prompted) Engram title: ")
 
-engram.add_engram("prompted")
+vim.cmd("MiaEngramAdd prompted")
 local taken = engram.filename(config.get(), "prompt_test")
-check("collision re-prompt names the brain", prompts[3], ("(prompted) %s exists, edit title: "):format(taken))
+check(
+  "collision re-prompt names the brain",
+  prompts[3],
+  ("(prompted) engram %s already exists, edit title: "):format(taken)
+)
+check(
+  "MiaEngramAdd, the re-asked title is the one written",
+  vim.fs.basename(vim.api.nvim_buf_get_name(0)),
+  engram.filename(config.get(), "prompt_test_two")
+)
 
 -- lib: synapse, reading
 
@@ -570,13 +654,14 @@ local function engram_path(name)
   return graph.location .. "/" .. name
 end
 local function write_engram(name, body)
-  vim.fn.writefile(vim.list_extend(engram.header(config.get()), body), engram_path(name))
+  local header = engram.header(config.get()) --[[@as string[] ]]
+  vim.fn.writefile(vim.list_extend(header, body), engram_path(name))
 end
 local function block_of(name)
   return synapse.parse_synapse_block(vim.fn.readfile(engram_path(name)))
 end
-local function set_dna(value)
-  json.write(config.brain_config_path(graph.location), value)
+local function set_dna(value, target)
+  json.write(config.brain_config_path((target or graph).location), value)
 end
 
 write_engram("a.md", { "", "# A" })
@@ -597,22 +682,52 @@ check(
   { a_before, b_before }
 )
 
-check("connect, self-link refused", synapse_module.connect(graph, "a.md", "a.md", "up"), false)
-check("connect, missing target refused", synapse_module.connect(graph, "a.md", "zzz.md", "up"), false)
-check("connect, concept field refused", synapse_module.connect(graph, "a.md", "b.md", "tags"), false)
+check("connect, self-link refused", synapse_module.connect(graph, "a.md", "a.md", "up"), nil)
+check(
+  "connect, self-link says why",
+  select(2, synapse_module.connect(graph, "a.md", "a.md", "up")),
+  "an engram cannot link to itself"
+)
+check("connect, missing target refused", synapse_module.connect(graph, "a.md", "zzz.md", "up"), nil)
+check("connect, concept field refused", synapse_module.connect(graph, "a.md", "b.md", "tags"), nil)
 
-notified = nil
-synapse_module.add_synapse({ source = scratch .. "/elsewhere/x.md", target = "b.md", field = "up" })
-check("add_synapse, outside a brain refused", notified, "memoria: not an engram in a registered brain")
+check("locate, an engram in a brain", synapse_module.locate(engram_path("a.md")), {
+  brain = graph,
+  filename = "a.md",
+})
+check("locate, outside every brain", synapse_module.locate(scratch .. "/elsewhere/x.md"), nil)
+check("locate, not markdown", synapse_module.locate(engram_path("a.txt")), nil)
+check("locate, below a brain is not in it", synapse_module.locate(graph.location .. "/sub/a.md"), nil)
+check(
+  "add_synapse, outside a brain refused",
+  select(2, synapse_module.add_synapse({ source = scratch .. "/elsewhere/x.md", target = "b.md", field = "up" })),
+  "not an engram in a registered brain"
+)
+check(
+  "add_synapse, a field is required",
+  ---@diagnostic disable-next-line: missing-fields
+  select(2, synapse_module.add_synapse({ source = engram_path("a.md"), target = "b.md" })),
+  "a synapse field is required"
+)
+check(
+  "add_synapse, answers what it linked",
+  synapse_module.add_synapse({
+    source = engram_path("a.md"),
+    target = "b.md",
+    field = "up",
+  }),
+  { brain = "graph", source = "a.md", field = "up", target = "b.md" }
+)
 
 choices = { "down", "c.md" }
 selects = {}
-synapse_module.add_synapse({ source = engram_path("a.md") })
-check("add_synapse, pickers name the brain", selects, {
+vim.cmd.edit(vim.fn.fnameescape(engram_path("a.md")))
+vim.cmd("MiaSynapseAdd")
+check("MiaSynapseAdd, pickers name the brain", selects, {
   { prompt = "(graph) Synapse field:", labels = { "down", "up" } },
   { prompt = "(graph) down:", labels = { "B (b.md)", "C (c.md)" } },
 })
-check("add_synapse, picked", { block_of("a.md").down, block_of("c.md").up }, {
+check("MiaSynapseAdd, picked", { block_of("a.md").down, block_of("c.md").up }, {
   { { title = "c", path = "c.md" } },
   { { title = "a", path = "a.md" } },
 })
@@ -641,7 +756,7 @@ vim.fn.delete(config.brain_config_path(graph.location))
 
 vim.fn.writefile(unreadable, engram_path("d.md"))
 a_before = vim.fn.readfile(engram_path("a.md"))
-check("connect, unreadable frontmatter refused", synapse_module.connect(graph, "a.md", "d.md", "down"), false)
+check("connect, unreadable frontmatter refused", synapse_module.connect(graph, "a.md", "d.md", "down"), nil)
 check("connect, nothing written when one side fails", vim.fn.readfile(engram_path("a.md")), a_before)
 vim.fn.delete(engram_path("d.md"))
 
@@ -695,7 +810,6 @@ check("refresh, its tasks dropped", stored.tasks.not_done, {})
 
 -- commands: a brain that is chosen, not resolved, is picked when not named
 
-require("memoria.commands").create()
 brain.add(scratch .. "/picked", "picked")
 vim.cmd.edit(vim.fn.fnameescape(engram_path("a.md")))
 choices, selects = { "picked" }, {}
@@ -710,6 +824,13 @@ check("MiaBrainDeregister, no name: picker", brain.get("picked"), nil)
 choices = {}
 vim.cmd("MiaBrainSwitch graph")
 check("MiaBrainSwitch, named: no picker", brain.active(), graph)
+
+-- A named brain that is not registered is an error, never the picker: the
+-- caller said which one.
+notified, selects = nil, {}
+vim.cmd("MiaEngramAdd nope")
+check("MiaEngramAdd, unknown brain is reported", notified, "memoria: no brain 'nope'")
+check("MiaEngramAdd, unknown brain never picks", #selects, 0)
 vim.cmd("enew")
 
 -- modules: atlas, rebuild
@@ -731,25 +852,103 @@ local function quickfix()
   end, vim.fn.getqflist())
 end
 
-atlas.rebuild_atlas("graph")
-check("rebuild_atlas, problems in the quickfix list", quickfix(), {
+local rebuild = atlas.rebuild_atlas("graph") --[[@as memoria.RebuildResult]]
+check("rebuild_atlas, unknown brain", { atlas.rebuild_atlas("nope") }, { nil, "no brain 'nope'" })
+check("rebuild_atlas, the atlas it rebuilt", vim.tbl_count(rebuild.atlas.engrams), 3)
+check(
+  "rebuild_atlas, the kinds it found",
+  vim.tbl_map(function(problem)
+    return problem.kind
+  end, rebuild.problems),
+  {
+    "broken_synapse",
+    "broken_synapse",
+    "missing_inverse",
+    "broken_synapse",
+    "broken_link",
+  }
+)
+check(
+  "locate_problems, rows",
+  vim.tbl_map(function(problem)
+    return { file = vim.fs.basename(problem.file), line = problem.line }
+  end, atlas.locate_problems(graph, rebuild.problems)),
+  {
+    { file = "a.md", line = 5 },
+    { file = "a.md", line = 7 },
+    { file = "a.md", line = 7 },
+    { file = "b.md", line = 6 },
+    { file = "e.md", line = 2 },
+  }
+)
+
+vim.cmd("MiaAtlasRebuild graph")
+check("MiaAtlasRebuild, problems in the quickfix list", quickfix(), {
   { file = "a.md", row = 5, text = "broken synapse: down → c.md" },
   { file = "a.md", row = 7, text = "broken synapse: up → c.md" },
   { file = "a.md", row = 7, text = "missing inverse: b.md has no down → a.md" },
   { file = "b.md", row = 6, text = "broken synapse: up → c.md" },
   { file = "e.md", row = 2, text = "broken link: gone.md" },
 })
-check("rebuild_atlas, summary", notified, "memoria: (graph) 3 engrams, 5 problems")
+check("MiaAtlasRebuild, summary", notified, "memoria: (graph) 3 engrams, 5 problems")
 vim.cmd("cclose")
 
 set_dna({ synapses = { side = { target = "engram" } } })
-atlas.rebuild_atlas("graph", { fix = true })
-check("rebuild_atlas fix, inverse written", block_of("b.md").down, { { title = "a", path = "a.md" } })
-check("rebuild_atlas fix, new field backfilled", block_of("a.md").side, {})
-check("rebuild_atlas fix, engram without a block left alone", block_of("e.md"), nil)
-check("rebuild_atlas fix, broken links remain", #quickfix(), 4)
+vim.cmd("MiaAtlasRebuild! graph")
+check("MiaAtlasRebuild!, inverse written", block_of("b.md").down, { { title = "a", path = "a.md" } })
+check("MiaAtlasRebuild!, new field backfilled", block_of("a.md").side, {})
+check("MiaAtlasRebuild!, engram without a block left alone", block_of("e.md"), nil)
+check("MiaAtlasRebuild!, broken links remain", #quickfix(), 4)
 vim.cmd("cclose")
 vim.fn.delete(config.brain_config_path(graph.location))
+
+-- modules: engram, headless creation
+
+local made = brain.add(scratch .. "/made", "made") --[[@as memoria.Brain]]
+
+local new = engram.add_engram("made", {
+  title = "Project X",
+  fields = { tags = { "java", "streams" } },
+  body = "first\nsecond",
+}) --[[@as memoria.NewEngram]]
+check("add_engram, answers the path", new.path, made.location .. "/" .. engram.filename(config.get(), "project_x"))
+check("add_engram, answers where the cursor goes", new.cursor, { 13, 6 })
+check("add_engram, nothing opened", vim.api.nvim_buf_get_name(0) == new.path, false)
+check("add_engram, what it wrote", vim.fn.readfile(new.path), {
+  "---",
+  "tags: [java, streams]",
+  "---",
+  "<!-- SYNAPSES -->",
+  "- **down:**",
+  "- **up:**",
+  "***",
+  "<!-- /SYNAPSES -->",
+  "",
+  "# Project X",
+  "",
+  "first",
+  "second",
+})
+check("add_engram, the atlas has it", atlas.refresh(made).engrams[vim.fs.basename(new.path)].title, "Project X")
+
+check("add_engram, a title is required", { engram.add_engram("made") }, { nil, "a title is required" })
+check("add_engram, collision", { engram.add_engram("made", { title = "Project X" }) }, {
+  nil,
+  ("engram %s already exists"):format(engram.filename(config.get(), "project_x")),
+  "collision",
+})
+check("add_engram, nothing usable in the title", { engram.add_engram("made", { title = "///" }) }, {
+  nil,
+  "the title needs a letter or digit",
+  "empty_slug",
+})
+check("add_engram, unknown brain", { engram.add_engram("nope", { title = "X" }) }, { nil, "no brain 'nope'" })
+
+set_dna({ engrams = { filename = { prefix = "bogus" } } }, made)
+check("add_engram, an unsupported prefix is not worth re-asking", {
+  engram.add_engram("made", { title = "X" }),
+}, { nil, "filename prefix 'bogus' is not supported", "prefix" })
+vim.fn.delete(config.brain_config_path(made.location))
 
 vim.fn.delete(scratch, "rf")
 

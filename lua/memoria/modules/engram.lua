@@ -8,7 +8,18 @@ local date = require("memoria.lib.date")
 local synapse = require("memoria.lib.synapse")
 
 ---@class memoria.AddEngramOpts
----@field title? string Seeds the title prompt
+---@field title? string Title as typed; the filename uses its slug
+---@field fields? table<string, string|string[]> Values by concept field name
+---@field body? string Prose put where %cursor% is
+
+---@class memoria.NewEngram
+---@field path string Absolute path of the new engram
+---@field cursor integer[] { row, col } where writing starts
+
+---@alias memoria.AddEngramCode
+---| "empty_slug" # The title leaves nothing a filename can use
+---| "collision" # That filename is already taken
+---| "prefix" # The configured filename prefix is not supported
 
 --- Filename for a slug under the configured prefix.
 ---@param cfg memoria.Config Brain config
@@ -45,23 +56,62 @@ function M.slugify(title, separator)
   return (slug:gsub("^" .. edge .. "+", ""):gsub(edge .. "+$", ""))
 end
 
---- Frontmatter and SYNAPSES block, straight from config. Each is left out
---- when it has no fields.
+-- What a flow-list item cannot hold unquoted: the list's own punctuation, a
+-- quote, a mapping colon, or whitespace at either end.
+local NEEDS_QUOTES = "[%[%],:\"'\n]"
+
+--- One item of a frontmatter flow list, quoted when it would otherwise read as
+--- structure rather than text.
+---@param value string
+---@return string
+local function flow_value(value)
+  if not value:find(NEEDS_QUOTES) and value == vim.trim(value) then
+    return value
+  end
+  return '"' .. value:gsub('[\\"]', "\\%0") .. '"'
+end
+
+--- Frontmatter and SYNAPSES block, straight from config, with `fields`' values
+--- in the frontmatter. Each part is left out when it has no fields.
 ---@param cfg memoria.Config Brain config
----@return string[] lines
-function M.header(cfg)
+---@param fields? table<string, string|string[]> Values by concept field name
+---@return string[]? lines
+---@return string? err Why a field was refused
+function M.header(cfg, fields)
   local lines = {}
   local concept_fields = synapse.field_names(cfg.synapses, "concept")
+
+  for name in pairs(fields or {}) do
+    if not vim.tbl_contains(concept_fields, name) then
+      return nil, ("no concept field '%s'"):format(name)
+    end
+  end
+
   if #concept_fields > 0 then
     table.insert(lines, "---")
     for _, name in ipairs(concept_fields) do
-      table.insert(lines, name .. ": []")
+      local values = (fields or {})[name]
+      if type(values) == "string" then
+        values = { values }
+      elseif values ~= nil and not vim.islist(values) then
+        return nil, ("field '%s' takes strings"):format(name)
+      end
+
+      local items = {}
+      for _, value in ipairs(values or {}) do
+        if type(value) ~= "string" then
+          return nil, ("field '%s' takes strings"):format(name)
+        end
+        table.insert(items, flow_value(value))
+      end
+      table.insert(lines, ("%s: [%s]"):format(name, table.concat(items, ", ")))
     end
     table.insert(lines, "---")
   end
 
   -- The frontmatter is ours and always readable, so this cannot fail.
-  return synapse.write_synapse_block(lines, { synapses = {} }, cfg.synapses) --[[@as string[] ]]
+  local written = synapse.write_synapse_block(lines, { synapses = {} }, cfg.synapses) --[[@as string[] ]]
+  return written
 end
 
 --- Header and prose as one file, and where the cursor lands in it. A blank
@@ -113,71 +163,91 @@ function M.render_template(template, vars)
   return lines, cursor
 end
 
---- Ask for a value; nil when cancelled.
----@param message string
----@param default? string
----@return string?
-local function prompt(message, default)
-  local ok, value = pcall(vim.fn.input, message, default or "")
-  return ok and value or nil
+--- Put `body` where the cursor would land, so the template still frames it,
+--- and move the cursor past it.
+---@param prose string[] Rendered template
+---@param cursor integer[] { row, col } within `prose`
+---@param body string Body text, newlines splitting lines
+---@return string[] lines
+---@return integer[] cursor { row, col } after the body
+function M.insert_body(prose, cursor, body)
+  local lines = vim.deepcopy(prose)
+  local row, col = cursor[1], cursor[2]
+  local line = lines[row] or ""
+  local before, after = line:sub(1, col), line:sub(col + 1)
+
+  local inserted = vim.split(body, "\n", { plain = true })
+  inserted[1] = before .. inserted[1]
+  local last = #inserted
+  local at = { row + last - 1, #inserted[last] }
+  inserted[last] = inserted[last] .. after
+
+  local tail = vim.list_slice(lines, row + 1)
+  lines = vim.list_slice(lines, 1, row - 1)
+  vim.list_extend(lines, inserted)
+  vim.list_extend(lines, tail)
+  return lines, at
 end
 
---- Create an engram in a brain and open it.
+--- Create an engram in a brain. Opening it is the view's, which is why this
+--- answers where the cursor goes rather than putting it there.
 ---@param brain_name? string Default: resolved (see brain.resolve)
 ---@param opts? memoria.AddEngramOpts
+---@return memoria.NewEngram? new
+---@return string? err
+---@return memoria.AddEngramCode? code What kind of failure, when re-asking may help
 function M.add_engram(brain_name, opts)
   opts = opts or {}
 
-  brain.resolve(brain_name, function(target)
-    local cfg = config.load_brain_config(target.location)
+  local target, err = brain.resolve(brain_name)
+  if not target then
+    return nil, err
+  end
 
-    local _, unsupported = M.filename(cfg, "")
-    if unsupported then
-      vim.notify("memoria: " .. unsupported, vim.log.levels.ERROR)
-      return
-    end
+  local cfg = config.load_brain_config(target.location)
+  local _, unsupported = M.filename(cfg, "")
+  if unsupported then
+    return nil, unsupported, "prefix"
+  end
 
-    -- Every prompt names its brain: which one a command resolved to (§2.2) is
-    -- not obvious from the buffer it was run in.
-    local in_brain = ("(%s) "):format(target.name)
-    local message = in_brain .. "Engram title: "
-    local title = opts.title
-    local filename
-    while true do
-      title = prompt(message, title)
-      if not title or vim.trim(title) == "" then
-        return
-      end
+  local title = opts.title and vim.trim(opts.title) or ""
+  if title == "" then
+    return nil, "a title is required"
+  end
 
-      local slug = M.slugify(title, cfg.engrams.filename.separator)
-      filename = M.filename(cfg, slug) --[[@as string]]
-      if slug == "" then
-        message = in_brain .. "Title needs a letter or digit: "
-      elseif vim.uv.fs_stat(target.location .. "/" .. filename) then
-        message = in_brain .. filename .. " exists, edit title: "
-      else
-        break
-      end
-    end
+  local slug = M.slugify(title, cfg.engrams.filename.separator)
+  if slug == "" then
+    return nil, "the title needs a letter or digit", "empty_slug"
+  end
 
-    ---@cast title string
-    local header = M.header(cfg)
-    local prose, cursor = M.render_template(cfg.engrams.content_template, {
-      title = vim.trim(title),
-      date = date.format(cfg.engrams.date_format),
-    })
+  local filename = M.filename(cfg, slug) --[[@as string]]
+  local path = target.location .. "/" .. filename
+  if vim.uv.fs_stat(path) then
+    return nil, ("engram %s already exists"):format(filename), "collision"
+  end
 
-    local lines, at = M.compose(header, prose, cursor)
-    local path = target.location .. "/" .. filename
-    if vim.fn.writefile(lines, path) ~= 0 then
-      vim.notify("memoria: could not write " .. path, vim.log.levels.ERROR)
-      return
-    end
-    atlas.refresh(target)
+  local header, header_err = M.header(cfg, opts.fields)
+  if not header then
+    return nil, header_err
+  end
 
-    vim.cmd.edit(vim.fn.fnameescape(path))
-    vim.api.nvim_win_set_cursor(0, at)
-  end)
+  local prose, cursor = M.render_template(cfg.engrams.content_template, {
+    title = title,
+    date = date.format(cfg.engrams.date_format),
+  })
+  if opts.body then
+    prose, cursor = M.insert_body(prose, cursor, opts.body)
+  end
+
+  local lines, at = M.compose(header, prose, cursor)
+  if vim.fn.writefile(lines, path) ~= 0 then
+    return nil, "could not write " .. path
+  end
+
+  -- The file is written; an atlas that could not be refreshed is rebuildable
+  -- by definition, and is not this engram's problem.
+  atlas.refresh(target)
+  return { path = path, cursor = at }
 end
 
 return M
