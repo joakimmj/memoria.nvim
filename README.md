@@ -69,7 +69,7 @@ Full reference: `:help memoria`.
 > [!IMPORTANT]
 > - Requires Neovim 0.10 or later
 > - `nvim-treesitter` with the `markdown` and `markdown_inline` parsers
-> - [md-drafting.nvim](https://github.com/joakimmj/md-drafting.nvim) v0.2.0
+> - [md-drafting.nvim](https://github.com/joakimmj/md-drafting.nvim) v0.3.0
 
 ## ⚙️ Configuration
 
