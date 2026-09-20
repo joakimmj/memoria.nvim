@@ -53,6 +53,7 @@ local loaded_before = package.loaded["md-drafting"] ~= nil
 
 local atlas = require("memoria.modules.atlas")
 local brain = require("memoria.modules.brain")
+local cli = require("memoria.cli")
 local config = require("memoria.config")
 local md_drafting = require("memoria.lib.md-drafting")
 local date = require("memoria.lib.date")
@@ -141,6 +142,7 @@ for _, group in ipairs({ "syntax", "section" }) do
   end
 end
 local sources = vim.fn.glob("lua/**/*.lua", false, true)
+table.insert(sources, "bin/mia")
 for _, path in ipairs(sources) do
   if path ~= "lua/memoria/lib/md-drafting.lua" then
     local source = table.concat(vim.fn.readfile(path), "\n")
@@ -163,6 +165,7 @@ for _, path in ipairs(vim.fn.glob("lua/memoria/modules/*.lua", false, true)) do
 end
 
 local headless = vim.fn.glob("lua/memoria/{modules,lib}/*.lua", false, true)
+table.insert(headless, "lua/memoria/cli.lua")
 for _, path in ipairs(headless) do
   local source = table.concat(vim.fn.readfile(path), "\n")
   check(path .. " does not reach into the view", source:find('require%("memoria%.ui') == nil, true)
@@ -949,6 +952,304 @@ check("add_engram, an unsupported prefix is not worth re-asking", {
   engram.add_engram("made", { title = "X" }),
 }, { nil, "filename prefix 'bogus' is not supported", "prefix" })
 vim.fn.delete(config.brain_config_path(made.location))
+
+-- cli: parsing
+
+local function parsed(name, argv)
+  return {
+    cli.parse(cli.find(name) --[[@as memoria.CliCommand]], argv),
+  }
+end
+
+check("parse, an option and its value", parsed("engrams", { "--brain", "work" })[1].options, { brain = "work" })
+check("parse, a flag", parsed("rebuild", { "--fix" })[1].options, { fix = true })
+check("parse, a positional", parsed("engram", { "a.md" })[1].positional, { "a.md" })
+check("parse, positionals and options together", parsed("add-synapse", { "a.md", "up", "b.md", "--brain", "w" })[1], {
+  positional = { "a.md", "up", "b.md" },
+  options = { brain = "w" },
+})
+check(
+  "parse, a repeated option",
+  parsed("add-engram", { "--title", "T", "--field", "a=1", "--field", "b=2" })[1].options,
+  {
+    title = "T",
+    field = { "a=1", "b=2" },
+  }
+)
+check("parse, unknown option", parsed("engrams", { "--bogus" })[2], "unknown option '--bogus' for 'engrams'")
+check("parse, option without its value", parsed("engrams", { "--brain" })[2], "--brain needs a value")
+check("parse, too many positionals", parsed("engram", { "a.md", "b.md" })[2], "'engram' takes 1 argument")
+check("parse, a command that takes none", parsed("brains", { "x" })[2], "'brains' takes 0 arguments")
+check("parse, missing positional", parsed("engram", {})[2], "engram needs <file>")
+check("parse, missing option", parsed("add-engram", {})[2], "add-engram needs --title")
+
+-- cli: the command table
+
+check(
+  "the command table, in order",
+  vim.tbl_map(function(command)
+    return command.name
+  end, cli.commands),
+  {
+    "brains",
+    "engrams",
+    "engram",
+    "tasks",
+    "check",
+    "rebuild",
+    "add-engram",
+    "add-synapse",
+    "commands",
+  }
+)
+for _, command in ipairs(cli.commands) do
+  check(command.name .. " is described", type(command.description) == "string" and command.description ~= "", true)
+  check(command.name .. " runs", type(command.run), "function")
+  for _, argument in ipairs(command.arguments) do
+    check(
+      ("%s's %s is described"):format(command.name, argument.name),
+      type(argument.description) == "string" and argument.description ~= "",
+      true
+    )
+  end
+end
+check("commands is JSON, with no function in it", pcall(vim.json.encode, cli.run({ "commands" })), true)
+check("commands lists every command", #(cli.run({ "commands" }) --[[@as table]]).commands, #cli.commands)
+
+-- cli: usage
+
+local function usage(name)
+  return table.concat(cli.usage(name), "\n")
+end
+
+check(
+  "usage, a line per command",
+  vim.tbl_filter(function(line)
+    return line:match("^  %S")
+  end, cli.usage()),
+  {
+    "  brains",
+    "  engrams [--brain <name>] [--concept <concept>]",
+    "  engram <file> [--brain <name>]",
+    "  tasks [--brain <name>] [--state <state>]",
+    "  check [--brain <name>]",
+    "  rebuild [--brain <name>] [--fix]",
+    "  add-engram [--brain <name>] --title <title> [--field <name=value>] [--body <text>]",
+    "  add-synapse <source> <field> <target> [--brain <name>]",
+    "  commands",
+  }
+)
+check("usage, one command leads with its own line", cli.usage("engram")[1], "engram <file> [--brain <name>]")
+check("usage, a required argument is bare", usage("engram"):find("<file>   ", 1, true) ~= nil, true)
+check("usage, a required option says so", usage("add-engram"):find("(required)", 1, true) ~= nil, true)
+check("usage, a repeated option says so", usage("add-engram"):find("(repeatable)", 1, true) ~= nil, true)
+check("usage, every argument is explained", select(2, usage("add-engram"):gsub("\n  %-%-", "")), 4)
+check("usage, a command with no arguments", cli.usage("brains"), {
+  "brains",
+  "",
+  "Every registered brain",
+})
+check("usage, an unknown command falls back to all of them", usage("nope"), usage())
+
+-- cli: running commands
+
+--- A table's keys, sorted, so an assertion does not depend on map order.
+---@param map table
+---@return string[]
+local function sorted_keys(map)
+  local keys = vim.tbl_keys(map)
+  table.sort(keys)
+  return keys
+end
+
+local function ran(argv)
+  local result, err = cli.run(argv)
+  return result or err
+end
+
+check(
+  "cli brains",
+  vim.tbl_map(function(entry)
+    return entry.name
+  end, ran({ "brains" }).brains),
+  { "graph", "made", "prompted" }
+)
+check("cli brains, an existing folder", ran({ "brains" }).brains[1].exists, true)
+check("cli, no command", ran({}), "no command given; 'commands' lists them, --help explains them")
+check("cli, unknown command", ran({ "nope" }), "unknown command 'nope'; 'commands' lists them, --help explains them")
+check("cli, unknown brain", ran({ "engrams", "--brain", "nope" }), "no brain 'nope'")
+check("cli, no brain named resolves the same way the editor does", ran({ "engrams" }).brain, "graph")
+
+check(
+  "cli engrams",
+  vim.tbl_map(function(entry)
+    return entry.file
+  end, ran({ "engrams", "--brain", "graph" }).engrams),
+  { "a.md", "b.md", "e.md" }
+)
+check("cli engrams, a concept nothing names", ran({ "engrams", "--brain", "made", "--concept", "nope" }).engrams, {})
+check(
+  "cli engrams, by concept",
+  vim.tbl_map(function(entry)
+    return entry.file
+  end, ran({ "engrams", "--brain", "made", "--concept", "java" }).engrams),
+  { vim.fs.basename(new.path) }
+)
+
+local shown = ran({ "engram", "--brain", "graph", "a.md" })
+check("cli engram, its entry", shown.entry.title, "A")
+check("cli engram, its backlinks", shown.backlinks, { "b.md" })
+check("cli engram, its content", shown.content, table.concat(vim.fn.readfile(engram_path("a.md")), "\n"))
+check("cli engram, one that is not there", ran({ "engram", "--brain", "graph", "zzz.md" }), "(graph) no engram zzz.md")
+
+check("cli tasks, both buckets", sorted_keys(ran({ "tasks", "--brain", "graph" }).tasks), { "done", "not_done" })
+check("cli tasks, one bucket", sorted_keys(ran({ "tasks", "--brain", "graph", "--state", "done" }).tasks), { "done" })
+check(
+  "cli tasks, an unknown state",
+  ran({ "tasks", "--brain", "graph", "--state", "bogus" }),
+  "(graph) no task state 'bogus'; it is 'not_done' or 'done'"
+)
+
+local checked = ran({ "check", "--brain", "graph" })
+check("cli check, the count", checked.engrams, 3)
+check("cli check, a problem with file, line and kind", checked.problems[1], {
+  engram = "a.md",
+  file = engram_path("a.md"),
+  line = 5,
+  kind = "broken_synapse",
+  text = "broken synapse: down → c.md",
+})
+check("cli rebuild --fix leaves what it cannot repair", #ran({ "rebuild", "--brain", "graph", "--fix" }).problems, 4)
+
+local added = ran({ "add-engram", "--brain", "made", "--title", "From the CLI", "--field", "tags=java, lua" })
+check("cli add-engram", vim.fn.readfile(added.path)[2], "tags: [java, lua]")
+check(
+  "cli add-engram, a field that is not configured",
+  ran({
+    "add-engram",
+    "--brain",
+    "made",
+    "--title",
+    "X",
+    "--field",
+    "bogus=1",
+  }),
+  "(made) no concept field 'bogus'"
+)
+check(
+  "cli add-engram, a field without a value",
+  ran({
+    "add-engram",
+    "--brain",
+    "made",
+    "--title",
+    "X",
+    "--field",
+    "bogus",
+  }),
+  "(made) --field takes name=value"
+)
+
+check(
+  "cli add-synapse",
+  ran({ "add-synapse", "--brain", "made", vim.fs.basename(added.file), "up", vim.fs.basename(new.path) }),
+  {
+    brain = "made",
+    source = added.file,
+    field = "up",
+    target = vim.fs.basename(new.path),
+  }
+)
+check("cli add-synapse, the inverse is written too", synapse.parse_synapse_block(vim.fn.readfile(new.path)).down, {
+  { title = (added.file:gsub("%.md$", "")), path = added.file },
+})
+
+-- cli: bin/mia
+
+local mia = vim.fn.fnamemodify("bin/mia", ":p")
+local mia_init = scratch .. "/init.lua"
+vim.fn.writefile({
+  ('package.path = "%s/lua/?.lua;%s/lua/?/init.lua;" .. package.path'):format(md_drafting_dir, md_drafting_dir),
+  'print("from the config")',
+  'require("memoria").setup({})',
+}, mia_init)
+
+--- Run bin/mia the way a caller outside the editor does: its own process,
+--- with the config sourced.
+---@param argv string[] The command and its arguments
+---@param opts? table Extra vim.system options, e.g. env or stdin
+---@return { code: integer, out: any, stderr: string }
+local function mia_run(argv, opts)
+  opts = vim.tbl_extend("force", { text = true }, opts or {})
+  opts.env = vim.tbl_extend("force", { MEMORIA_INIT = mia_init }, opts.env or {})
+
+  -- vim.v.progpath, not "nvim": the child is the binary running this.
+  local done = vim.system(vim.list_extend({ vim.v.progpath, "-l", mia }, argv), opts):wait()
+  local ok, decoded = pcall(vim.json.decode, done.stdout)
+  return { code = done.code, out = ok and decoded or done.stdout, stderr = done.stderr }
+end
+
+local listed = mia_run({ "brains" })
+check("bin/mia, exit status", listed.code, 0)
+check("bin/mia, one JSON object on stdout", listed.out.ok, true)
+check(
+  "bin/mia, the result",
+  vim.tbl_map(function(entry)
+    return entry.name
+  end, listed.out.result.brains),
+  { "graph", "made", "prompted" }
+)
+check("bin/mia, the config's own output goes to stderr", listed.stderr:find("from the config", 1, true) ~= nil, true)
+
+local refused = mia_run({ "nope" })
+check("bin/mia, a failure exits 1", refused.code, 1)
+check(
+  "bin/mia, a failure says why",
+  refused.out,
+  { ok = false, error = "unknown command 'nope'; 'commands' lists them, --help explains them" }
+)
+
+local piped = mia_run({ "add-engram", "--brain", "made", "--title", "Piped", "--body", "-" }, {
+  stdin = "line one\nline two",
+})
+check("bin/mia --body -, reads stdin", vim.list_slice(vim.fn.readfile(piped.out.result.path), 10), {
+  "# Piped",
+  "",
+  "line one",
+  "line two",
+})
+
+local helped = mia_run({ "--help" })
+check("bin/mia --help, exit status", helped.code, 0)
+check("bin/mia --help, plain text rather than JSON", type(helped.out), "string")
+check("bin/mia --help, every command", select(2, helped.out:gsub("\n  %S", "")), #cli.commands)
+
+local helped_one = mia_run({ "add-engram", "--help" })
+check(
+  "bin/mia <command> --help, that command only",
+  helped_one.out:match("^[^\n]*"),
+  table.concat({
+    "add-engram [--brain <name>] --title <title>",
+    "[--field <name=value>] [--body <text>]",
+  }, " ")
+)
+check("bin/mia <command> --help, its arguments", helped_one.out:find("(repeatable)", 1, true) ~= nil, true)
+
+vim.fn.writefile({ "-- a config that never sets memoria up" }, scratch .. "/bare.lua")
+local bare = mia_run({ "brains" }, { env = { MEMORIA_INIT = scratch .. "/bare.lua" } })
+check("bin/mia, a config without setup() is refused", bare.code, 1)
+check("bin/mia, and says which config", bare.out.error:find("bare.lua did not call", 1, true) ~= nil, true)
+
+local bare_help = mia_run({ "--help" }, { env = { MEMORIA_INIT = scratch .. "/bare.lua" } })
+check("bin/mia --help, loads no config", bare_help.code, 0)
+
+local missing = mia_run({ "brains" }, { env = { MEMORIA_INIT = scratch .. "/gone.lua" } })
+check("bin/mia, no config at all", missing.out.error:find("no config at", 1, true) ~= nil, true)
+
+-- Packages are off under `nvim -l`, so NONE genuinely has no md-drafting.
+local alone = mia_run({ "brains" }, { env = { MEMORIA_INIT = "NONE" } })
+check("bin/mia NONE, without md-drafting", alone.code, 1)
+check("bin/mia NONE, names the dependency", alone.out.error:find("md-drafting.nvim", 1, true) ~= nil, true)
 
 vim.fn.delete(scratch, "rf")
 

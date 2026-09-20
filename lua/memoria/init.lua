@@ -21,13 +21,13 @@ M.core = {
 
 --- Check the dependency, store options and create commands.
 ---@param opts? table Options, see |memoria-config|
+---@return boolean? ok
+---@return string? err Why memoria did not set up
 function M.setup(opts)
   if not md_drafting.available() then
-    vim.notify(
-      "memoria.nvim requires md-drafting.nvim (with its api table) — add it as a dependency and restart",
-      vim.log.levels.ERROR
-    )
-    return
+    local err = "memoria.nvim requires md-drafting.nvim (with its api table) — add it as a dependency and restart"
+    vim.notify(err, vim.log.levels.ERROR)
+    return nil, err
   end
 
   config.options = opts or {}
@@ -35,6 +35,11 @@ function M.setup(opts)
   if config.get().add_commands then
     require("memoria.commands").create()
   end
+
+  -- Last, so a setup that stopped above leaves it false: it is what the CLI
+  -- tests to know the user's config really configured memoria.
+  config.configured = true
+  return true
 end
 
 return M

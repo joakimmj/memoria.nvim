@@ -1,5 +1,5 @@
 -- Configuration tiers: built-in defaults, setup() options, and a brain's own
--- `.mia_dna.json`. See ARCHITECTURE.md Part 3 §3.
+-- `.mia_dna.json`. See |memoria-config|.
 local M = {}
 
 local json = require("memoria.lib.json")
@@ -61,6 +61,11 @@ M.defaults = {
 --- Options given to setup().
 ---@type table
 M.options = {}
+
+--- Whether setup() has run. The CLI refuses to write with a config that was
+--- sourced without it, see |memoria-cli|.
+---@type boolean
+M.configured = false
 
 -- Maps whose entries are optional: a key removed from one stays removed. Every
 -- other setting is required, so removing it falls back to the built-in default.

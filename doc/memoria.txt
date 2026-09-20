@@ -14,7 +14,8 @@ CONTENTS                                                *memoria-contents*
     6. Synapses ............................... |memoria-synapses|
     7. Atlas .................................. |memoria-atlas|
     8. Commands ............................... |memoria-commands|
-    9. API .................................... |memoria-api|
+    9. CLI .................................... |memoria-cli|
+   10. API .................................... |memoria-api|
 
 ==============================================================================
 1. INTRODUCTION                                     *memoria-introduction*
@@ -113,7 +114,8 @@ one. Prompts name their brain, e.g. >
     (work) Engram title:
 <
 A brain that *is* named must exist: an unknown name is an error, never the
-picker.
+picker. Steps 3 and 4 are why the CLI (|memoria-cli|) needs `--brain` only
+when more than one brain is registered.
 
 ==============================================================================
 5. ENGRAMS                                               *memoria-engrams*
@@ -224,7 +226,100 @@ These global commands are created unless `add_commands = false`.
                             quickfix list; with ! repair what can be
 
 ==============================================================================
-9. API                                                       *memoria-api*
+9. CLI                                                       *memoria-cli*
+
+`bin/mia` is memoria with no editor running: the same functions the commands
+call, from a shell. A script, a git hook, another editor, an AI agent — see
+|memoria-cli-agents| for that one.
+
+A brain is readable without memoria, being markdown and JSON. What is not
+writable without it is a correct one: a hand-written engram misses its
+generated header, and a hand-added synapse misses its inverse. >
+
+    bin/mia <command> [--brain <name>] [args]
+    bin/mia [command] --help
+<
+                                                        *memoria-cli-config*
+It is a Lua script run by `nvim -l`, which skips the user's config, and with
+it the `setup()` tier (|memoria-config|) — an engram written without that tier
+would have the built-in fields and template, not yours. So the script loads
+the config itself: `$MEMORIA_INIT`, else `stdpath("config")/init.lua`. A
+config that does not call `setup()` is an error rather than a fall back to the
+defaults, since that fallback is exactly the engram in the wrong shape; the
+error names the likely causes (memoria lazy-loaded on a command or key,
+md-drafting.nvim missing).
+
+`MEMORIA_INIT=NONE` skips the config and sets memoria up with its defaults —
+for tests, and for a machine with no config worth loading. The brain's
+`.mia_dna.json` still applies on top. `nvim -l` loads no packages, so
+md-drafting.nvim has to be on `package.path` already for that to work.
+
+                                                        *memoria-cli-output*
+One JSON object on stdout, and an exit status to match: >
+
+    { "ok": true, "result": { "path": "/home/me/notes/work/20260801_x.md" } }
+    { "ok": false, "error": "(work) engram 20260801_x.md already exists" }
+<
+`0` for `ok`, `1` otherwise. Errors name their brain the way prompts do.
+Everything else — the config's own output, memoria's own diagnostics — goes to
+stderr, so stdout is only ever the result.
+
+`--help` is the one exception: it prints how to call the CLI as plain text,
+since it is meant for a person reading it, and exits 0. `--help` after a
+command explains that command and what each of its arguments is for. It loads
+no config, so it still answers when nothing else does.
+
+                                                      *memoria-cli-commands*
+`bin/mia commands` prints the list below as JSON, with each command's
+arguments, and is the place to start; `bin/mia --help` is the same list in
+words. Brain-scoped commands take
+`--brain`, needed only when more than one brain is registered
+(|memoria-brains|).
+
+    brains                  Every brain: name, location, whether it exists
+    engrams [--concept C]   Every engram: filename, title, concept fields
+                            and when it changed; only those naming C when
+                            given
+    engram {file}           One engram: its atlas entry, its backlinks and
+                            its content
+    tasks [--state S]       The tasks, by state: "not_done", "done", or both
+    check                   Rebuild the atlas and report what is wrong, each
+                            with its file, line and kind
+    rebuild [--fix]         The same; with --fix, repair what can be
+                            repaired first
+    add-engram --title T [--field name=value,...] [--body text|-]
+                            Create an engram, opening nothing. --field once
+                            per concept field; --body - reads stdin, so
+                            multi-line prose needs no shell quoting
+    add-synapse {source} {field} {target}
+                            Link two engrams, writing the inverse on the
+                            other one
+    commands                Every command and its arguments
+
+The surface is reading and adding. `rename_engram` and `delete_engram` are not
+on it: both reach beyond the file named, which is a change for someone to
+confirm in the editor rather than for something unattended to do unasked.
+
+                                                        *memoria-cli-agents*
+An AI agent needs only to be told it exists. Point one at it from its
+instructions file (`CLAUDE.md`, `AGENTS.md`): >
+
+    Notes live in memoria brains — folders of markdown engrams. Never write
+    or link one by hand: a hand-written engram misses its generated header,
+    and a hand-added link misses its inverse.
+
+    Use <path-to>/memoria.nvim/bin/mia. Start with `bin/mia commands`, which
+    prints every command and its arguments as JSON. Each call prints one JSON
+    object and exits 0 ("ok": true) or 1.
+<
+                                                       *memoria-cli-editing*
+The CLI writes to disk, never to a buffer. An engram open in a running Neovim
+is reloaded by 'autoread'/|:checktime| when unmodified; with unsaved changes
+you get |W12| and decide which side wins. The atlas refreshes whenever either
+side reads it, so each picks up what the other wrote.
+
+==============================================================================
+10. API                                                      *memoria-api*
 
     local memoria = require("memoria")
 
@@ -236,7 +331,7 @@ Two layers. `memoria.{feature}` is what the |memoria-commands| call: it asks
 for what you left out, opens what needs opening, and reports what went wrong —
 bind these to a keymap. `memoria.core.{feature}` is the same feature without
 any of that: it asks nothing, opens nothing, and answers a result, or nil and
-an error naming no brain.
+an error naming no brain. The CLI (|memoria-cli|) calls only the second.
 
     memoria.brain.add({path}, {name})
         Register a folder as a brain, reporting the result.

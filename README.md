@@ -24,6 +24,8 @@ Full reference: `:help memoria`.
   consistency report of broken links and one-sided synapses.
 - **Per-brain config:** Override any setting for one brain in its
   `.mia_dna.json`.
+- **CLI:** `bin/mia` is memoria with no editor running — the same functions the
+  commands call, from a shell, one JSON object per run.
 
 ## 📦 Installation
 
@@ -137,3 +139,47 @@ Every command is also a Lua function, e.g.
 exactly like `:MiaEngramAdd`. The same feature without the prompts and the
 buffer is `require("memoria").core.engram.add_engram(brain, opts)`, which
 answers a result or `nil, err`. See `:help memoria-api`.
+
+## 💻 CLI
+
+`bin/mia` is that headless layer with a shell in front of it — for a script, a
+git hook, another editor, or an AI agent. A brain is readable without memoria,
+being markdown and JSON; what is not writable without it is a *correct* one: a
+hand-written engram misses its generated header, and a hand-added link misses
+its inverse.
+
+```sh
+bin/mia --help                        # every command, in words
+bin/mia add-engram --help             # one command and what it takes
+bin/mia commands                      # the same, as JSON
+bin/mia brains
+bin/mia add-engram --title "Project X" --field tags=java,streams
+echo "Some prose." | bin/mia add-engram --title Notes --body -
+bin/mia add-synapse 20260801_notes.md up 20260801_project_x.md
+bin/mia check
+```
+
+Each run prints one JSON object — `{"ok":true,"result":…}` or
+`{"ok":false,"error":…}` — and exits `0` or `1`. It loads your own config, so
+an engram it writes has the same header and template as one written in the
+editor; `MEMORIA_INIT=NONE` skips that and uses the defaults.
+
+`--help` is the one exception: plain text for a person, and no config loaded,
+so it still answers when nothing else does. See `:help memoria-cli`.
+
+### 🤖 Agents
+
+An AI agent needs only to be told it exists. Point one at it from its
+instructions file (`CLAUDE.md`, `AGENTS.md`):
+
+```markdown
+## Notes
+
+Notes live in memoria brains — folders of markdown engrams. Never write or
+link one by hand: a hand-written engram misses its generated header, and a
+hand-added link misses its inverse.
+
+Use `<path-to>/memoria.nvim/bin/mia`. Start with `bin/mia commands`, which
+prints every command and its arguments as JSON. Each call prints one JSON
+object and exits 0 (`"ok": true`) or 1.
+```
