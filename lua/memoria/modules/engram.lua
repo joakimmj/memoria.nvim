@@ -3,14 +3,17 @@ local M = {}
 
 local atlas = require("memoria.modules.atlas")
 local brain = require("memoria.modules.brain")
+local concept = require("memoria.modules.concept")
 local config = require("memoria.config")
 local date = require("memoria.lib.date")
+local md_drafting = require("memoria.lib.md-drafting")
 local synapse = require("memoria.lib.synapse")
 
 ---@class memoria.CreateEngramOpts
 ---@field title? string Title as typed; the filename uses its slug
 ---@field fields? table<string, string|string[]> Values by concept field name
 ---@field body? string Prose put where %cursor% is
+---@field concept? string Concept the filename is prefixed with, and which is written into its field
 
 ---@class memoria.NewEngram
 ---@field path string Absolute path of the new engram
@@ -20,23 +23,35 @@ local synapse = require("memoria.lib.synapse")
 ---| "empty_slug" # The title leaves nothing a filename can use
 ---| "collision" # That filename is already taken
 ---| "prefix" # The configured filename prefix is not supported
+---| "concept" # The configured prefix needs a concept, and none was chosen
+
+---@class memoria.FilenameOpts
+---@field time? integer Epoch seconds, default now
+---@field concept? string Concept the "concept" prefix uses, slugified
 
 --- Filename for a slug under the configured prefix.
 ---@param cfg memoria.Config Brain config
 ---@param slug string User-typed slug
----@param time? integer Epoch seconds, default now
----@return string? filename Nil when the prefix mode is unsupported
+---@param opts? memoria.FilenameOpts
+---@return string? filename Nil when the prefix cannot be used
 ---@return string? err Why not
-function M.filename(cfg, slug, time)
-  local opts = cfg.engrams.filename
-  local prefix = opts.prefix or "none"
+---@return memoria.CreateEngramCode? code What kind of failure
+function M.filename(cfg, slug, opts)
+  opts = opts or {}
+  local filename = cfg.engrams.filename
+  local prefix = filename.prefix or "none"
 
   if prefix == "date" then
-    return date.format(cfg.engrams.date_format, time) .. opts.separator .. slug .. ".md"
+    return date.format(cfg.engrams.date_format, opts.time) .. filename.separator .. slug .. ".md"
   elseif prefix == "none" then
     return slug .. ".md"
+  elseif prefix == "concept" then
+    if not opts.concept or opts.concept == "" then
+      return nil, "a concept is required", "concept"
+    end
+    return M.slugify(opts.concept, filename.separator) .. filename.separator .. slug .. ".md"
   end
-  return nil, ("filename prefix '%s' is not supported"):format(prefix)
+  return nil, ("filename prefix '%s' is not supported"):format(prefix), "prefix"
 end
 
 -- Characters no filename may hold on common filesystems.
@@ -54,21 +69,6 @@ function M.slugify(title, separator)
   slug = slug:gsub(sep .. "+", separator)
   local edge = "[%." .. sep .. "]"
   return (slug:gsub("^" .. edge .. "+", ""):gsub(edge .. "+$", ""))
-end
-
--- What a flow-list item cannot hold unquoted: the list's own punctuation, a
--- quote, a mapping colon, or whitespace at either end.
-local NEEDS_QUOTES = "[%[%],:\"'\n]"
-
---- One item of a frontmatter flow list, quoted when it would otherwise read as
---- structure rather than text.
----@param value string
----@return string
-local function flow_value(value)
-  if not value:find(NEEDS_QUOTES) and value == vim.trim(value) then
-    return value
-  end
-  return '"' .. value:gsub('[\\"]', "\\%0") .. '"'
 end
 
 --- Frontmatter and SYNAPSES block, straight from config, with `fields`' values
@@ -97,14 +97,12 @@ function M.header(cfg, fields)
         return nil, ("field '%s' takes strings"):format(name)
       end
 
-      local items = {}
       for _, value in ipairs(values or {}) do
         if type(value) ~= "string" then
           return nil, ("field '%s' takes strings"):format(name)
         end
-        table.insert(items, flow_value(value))
       end
-      table.insert(lines, ("%s: [%s]"):format(name, table.concat(items, ", ")))
+      table.insert(lines, ("%s: %s"):format(name, md_drafting.syntax.format_frontmatter_value(values or {})))
     end
     table.insert(lines, "---")
   end
@@ -205,9 +203,45 @@ function M.create_engram(brain_name, opts)
   end
 
   local cfg = config.load_brain_config(target.location)
-  local _, unsupported = M.filename(cfg, "")
+  local fields = vim.deepcopy(opts.fields or {})
+
+  -- The prefix concept is resolved before anything is written, so the name in
+  -- the filename is the registry's own spelling rather than an alias.
+  local prefix
+  if cfg.engrams.filename.prefix == "concept" then
+    if not opts.concept or vim.trim(opts.concept) == "" then
+      return nil, "a concept is required", "concept"
+    end
+
+    local resolved, resolve_err = concept.resolve_concept(target.name, vim.trim(opts.concept))
+    if not resolved then
+      return nil, resolve_err, "concept"
+    end
+    prefix = resolved.name
+
+    -- Never only cosmetic: a prefix the engram does not also name would be
+    -- visible in a listing and invisible to everything that searches.
+    local field = concept.field_for(cfg, resolved.type)
+    if field then
+      local given = fields[field]
+      ---@type string[]
+      local values = {}
+      if type(given) == "string" then
+        values = { given }
+      elseif given then
+        values = vim.deepcopy(given)
+      end
+
+      if not vim.tbl_contains(values, prefix) then
+        table.insert(values, prefix)
+      end
+      fields[field] = cfg.synapses[field].list == false and { prefix } or values
+    end
+  end
+
+  local _, unsupported, code = M.filename(cfg, "", { concept = prefix })
   if unsupported then
-    return nil, unsupported, "prefix"
+    return nil, unsupported, code
   end
 
   local title = opts.title and vim.trim(opts.title) or ""
@@ -220,13 +254,13 @@ function M.create_engram(brain_name, opts)
     return nil, "the title needs a letter or digit", "empty_slug"
   end
 
-  local filename = M.filename(cfg, slug) --[[@as string]]
+  local filename = M.filename(cfg, slug, { concept = prefix }) --[[@as string]]
   local path = target.location .. "/" .. filename
   if vim.uv.fs_stat(path) then
     return nil, ("engram %s already exists"):format(filename), "collision"
   end
 
-  local header, header_err = M.header(cfg, opts.fields)
+  local header, header_err = M.header(cfg, fields)
   if not header then
     return nil, header_err
   end

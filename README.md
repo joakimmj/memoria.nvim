@@ -15,10 +15,13 @@ Full reference: `:help memoria`.
 ## ✨ Features
 
 - **Brains:** Register any folder as a brain, list them, switch between them.
-- **Engrams:** Create a note with a dated or plain filename, a generated
-  frontmatter and synapse header, and your own content template.
+- **Engrams:** Create a note with a dated, concept or plain filename, a
+  generated frontmatter and synapse header, and your own content template.
 - **Synapses:** Link two notes with one command; the inverse link (`up` ↔
   `down`) is written on the other note too.
+- **Concepts:** Give the people, tags and topics your notes name an entry of
+  their own — a type, aliases, an email or a description — and find the names
+  nothing has declared yet.
 - **Atlas:** A derived index of every brain — titles, links, backlinks, tags,
   tasks — kept up to date on its own and rebuildable at any time, with a
   consistency report of broken links and one-sided synapses.
@@ -82,7 +85,7 @@ require("memoria").setup({
     date_format = "YYYYMMDD",
 
     filename = {
-      -- "date" or "none".
+      -- "date", "concept" or "none".
       prefix = "date",
       -- Between the prefix and the slug, and for spaces in the slug.
       separator = "_",
@@ -102,11 +105,19 @@ require("memoria").setup({
   -- Fields on an engram: target "engram" writes a link in the SYNAPSES
   -- block, "concept" a frontmatter list. show_empty writes the field even
   -- with no values. inverse is the field kept in sync on the other engram;
-  -- list = false holds one value only. Both kinds are written sorted by name.
+  -- list = false holds one value only. concept_type is the concept type a
+  -- concept field expects, a hint for pickers. Both kinds are written sorted
+  -- by name.
   synapses = {
     up = { target = "engram", inverse = "down", list = true, show_empty = true },
     down = { target = "engram", inverse = "up", list = true, show_empty = true },
-    tags = { target = "concept" },
+    tags = { target = "concept", concept_type = "tag", list = true },
+  },
+
+  -- What a concept of each type is asked for when its meta is filled in.
+  -- Any type is allowed; one with no entry is asked for nothing extra.
+  concepts = {
+    tag = { fields = { "description" } },
   },
 })
 ```
@@ -130,9 +141,17 @@ differs — `:MiaBrainConfig` opens it, see `:help memoria-mia_dna.json`:
 :MiaBrainSwitch work
 :MiaEngramCreate
 :MiaSynapseAttach up
+:MiaConceptCreate
+:MiaConceptAttach tags
+:MiaConceptFill
 :MiaAtlasRebuild
 :MiaBrainConfig
 ```
+
+A brain's concepts live in `mia_concepts.json` beside its notes — visible,
+and meant to be edited by hand too. A person can carry an email, a tag a
+description, and a name no entry answers to is something `:MiaConceptFill`
+walks you through and `:MiaAtlasRebuild` reports. See `:help memoria-concepts`.
 
 Every command is also a Lua function, e.g.
 `require("memoria").engram.create_engram()` — bind it to a keymap and it behaves
@@ -156,6 +175,10 @@ bin/mia brains
 bin/mia create-engram --title "Project X" --field tags=java,streams
 echo "Some prose." | bin/mia create-engram --title Notes --body -
 bin/mia attach-synapse 20260801_notes.md up 20260801_project_x.md
+bin/mia concepts --undeclared
+bin/mia create-concept --name java --type tag --meta description="Java notes"
+bin/mia edit-concept --name java --meta description="The JVM kind"
+bin/mia attach-concept 20260801_notes.md tags java
 bin/mia check
 ```
 

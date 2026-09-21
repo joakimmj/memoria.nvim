@@ -26,6 +26,9 @@ function M.available()
 end
 
 M.syntax = {
+  ---@type fun(value: string|table): string
+  format_frontmatter_value = wrap("syntax", "format_frontmatter_value"),
+
   ---@type fun(text: string, path: string): string
   format_link = wrap("syntax", "format_link"),
 
@@ -46,6 +49,9 @@ M.syntax = {
 
   ---@type fun(line: string): string?, string?, string?
   parse_list_item = wrap("syntax", "parse_list_item"),
+
+  ---@type fun(lines: string[], name: string, value: string|table|nil): string[]?, string?
+  set_frontmatter_field = wrap("syntax", "set_frontmatter_field"),
 }
 
 M.section = {

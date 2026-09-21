@@ -4,6 +4,8 @@ local M = {}
 
 local atlas = require("memoria.modules.atlas")
 local brain = require("memoria.modules.brain")
+local concept = require("memoria.modules.concept")
+local concept_lib = require("memoria.lib.concept")
 local config = require("memoria.config")
 local engram = require("memoria.modules.engram")
 local file = require("memoria.lib.file")
@@ -85,6 +87,7 @@ local function rebuilt(target, fix)
   for _, problem in ipairs(atlas.locate_problems(target, result.problems)) do
     table.insert(problems, {
       engram = problem.engram,
+      concept = problem.concept,
       file = problem.file,
       line = problem.line,
       kind = problem.kind,
@@ -117,6 +120,23 @@ local function parse_fields(items)
     fields[name] = values
   end
   return fields
+end
+
+--- `--meta name=value` into a table, once per key. Unlike `--field`, a value
+--- is one string: a note or a colour has no list in it.
+---@param items? string[] What --meta was given, once per time it was
+---@return table<string, string>? meta
+---@return string? err
+local function parse_meta(items)
+  local meta = {}
+  for _, item in ipairs(items or {}) do
+    local name, value = item:match("^([^=]+)=(.*)$")
+    if not name then
+      return nil, "--meta takes name=value"
+    end
+    meta[vim.trim(name)] = vim.trim(value)
+  end
+  return meta
 end
 
 ---@type memoria.CliCommand[]
@@ -153,9 +173,12 @@ M.commands = {
         end
 
         local names = vim.tbl_keys(current.engrams)
-        local concept = args.options.concept --[[@as string?]]
-        if concept then
-          names = current.concepts[concept] or {}
+        local wanted = args.options.concept --[[@as string?]]
+        if wanted then
+          -- Either spelling finds it: the atlas indexes under the name a
+          -- mention resolves to, so an alias has to be resolved first.
+          local registry = concept_lib.read(target.location)
+          names = current.concepts[concept_lib.resolve(registry, wanted) or wanted] or {}
         end
         table.sort(names)
 
@@ -199,6 +222,52 @@ M.commands = {
           backlinks = current.backlinks[filename] or {},
           content = table.concat(lines or {}, "\n"),
         }
+      end)
+    end,
+  },
+  {
+    name = "concepts",
+    description = "Every concept registered in a brain",
+    arguments = {
+      BRAIN,
+      { name = "--type", value = "type", description = "Only concepts of this type" },
+      { name = "--undeclared", description = "The mentions no concept answers to instead" },
+    },
+    run = function(args)
+      return in_brain(args, function(target)
+        if args.options.undeclared then
+          if args.options.type then
+            return nil, "--type and --undeclared cannot be given together"
+          end
+
+          local undeclared, err = concept.find_undeclared_concepts(target.name)
+          if not undeclared then
+            return nil, err
+          end
+          return { brain = target.name, undeclared = undeclared }
+        end
+
+        local concepts, err = concept.list(target.name)
+        if not concepts then
+          return nil, err
+        end
+
+        local current = atlas.refresh(target)
+        local wanted = args.options.type --[[@as string?]]
+        local listed = {}
+        for _, entry in ipairs(concepts) do
+          if not wanted or entry.type == wanted then
+            table.insert(listed, {
+              name = entry.name,
+              type = entry.type,
+              aliases = entry.aliases,
+              note = entry.note,
+              meta = object(entry.meta),
+              engrams = current and current.concepts[entry.name] or {},
+            })
+          end
+        end
+        return { brain = target.name, concepts = listed }
       end)
     end,
   },
@@ -272,6 +341,11 @@ M.commands = {
         description = "Concept field values, comma-separated; once per field",
       },
       { name = "--body", value = "text", description = "Prose put where %cursor% is; '-' reads stdin" },
+      {
+        name = "--concept",
+        value = "name",
+        description = "Concept the filename is prefixed with, when the prefix is 'concept'",
+      },
     },
     run = function(args)
       return in_brain(args, function(target)
@@ -289,6 +363,7 @@ M.commands = {
           title = args.options.title --[[@as string]],
           fields = fields,
           body = body,
+          concept = args.options.concept --[[@as string?]],
         })
         if not new then
           return nil, add_err
@@ -318,6 +393,100 @@ M.commands = {
           return nil, err
         end
         return added
+      end)
+    end,
+  },
+  {
+    name = "create-concept",
+    description = "Create a concept, so a name an engram uses resolves to something",
+    arguments = {
+      BRAIN,
+      { name = "--name", value = "name", required = true, description = "What the concept is called" },
+      { name = "--type", value = "type", required = true, description = "What kind of thing it is; any string" },
+      { name = "--meta", value = "name=value", repeated = true, description = "Meta values; once per key" },
+    },
+    run = function(args)
+      return in_brain(args, function(target)
+        local meta, err = parse_meta(args.options.meta --[[@as string[]? ]])
+        if not meta then
+          return nil, err
+        end
+
+        local created, create_err = concept.create_concept(
+          target.name,
+          args.options.name --[[@as string]],
+          args.options.type --[[@as string]],
+          meta
+        )
+        if not created then
+          return nil, create_err
+        end
+        return { brain = target.name, concept = vim.tbl_extend("force", created, { meta = object(created.meta) }) }
+      end)
+    end,
+  },
+  {
+    name = "edit-concept",
+    description = "Change a registered concept's type or meta",
+    arguments = {
+      BRAIN,
+      { name = "--name", value = "name", required = true, description = "The concept, by its registered name" },
+      { name = "--type", value = "type", description = "Its new type" },
+      {
+        name = "--meta",
+        value = "name=value",
+        repeated = true,
+        description = "Meta values; once per key, an empty value removes it",
+      },
+    },
+    run = function(args)
+      return in_brain(args, function(target)
+        if not args.options.type and not args.options.meta then
+          return nil, "edit-concept needs --type or --meta"
+        end
+
+        local meta, err = parse_meta(args.options.meta --[[@as string[]? ]])
+        if not meta then
+          return nil, err
+        end
+
+        -- Only an existing concept: registering is create-concept's, so an edit
+        -- with a typo in the name is an error rather than a new concept.
+        local name = args.options.name --[[@as string]]
+        local found, get_err = concept.get(target.name, name)
+        if not found then
+          return nil, get_err
+        end
+
+        local written, write_err =
+          concept.set_concept_meta(target.name, found.name, args.options.type --[[@as string?]], meta)
+        if not written then
+          return nil, write_err
+        end
+        return { brain = target.name, concept = vim.tbl_extend("force", written, { meta = object(written.meta) }) }
+      end)
+    end,
+  },
+  {
+    name = "attach-concept",
+    description = "Put a concept in one of an engram's concept fields",
+    arguments = {
+      { name = "<source>", required = true, description = "Engram the field is written on" },
+      { name = "<field>", required = true, description = "Concept field, e.g. 'tags'" },
+      { name = "<concept>", required = true, description = "Concept name, or an alias of one" },
+      BRAIN,
+    },
+    run = function(args)
+      return in_brain(args, function(target)
+        local attached, err = concept.attach_concept({
+          source = target.location .. "/" .. vim.fs.basename(args.positional[1]),
+          field = args.positional[2],
+          concept = args.positional[3],
+        })
+        if not attached then
+          return nil, err
+        end
+        return attached
       end)
     end,
   },

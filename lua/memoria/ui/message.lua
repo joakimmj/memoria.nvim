@@ -1,5 +1,15 @@
--- What memoria says out loud: every notification, and the brain it is about.
+-- What memoria says out loud, and what it asks: every notification, the brain
+-- it is about, and the one-line prompt.
 local M = {}
+
+--- Ask for a value; nil when cancelled.
+---@param prompt string What to ask, already brain-named
+---@param default? string Filled in, so leaving it alone keeps it
+---@return string? answer
+function M.ask(prompt, default)
+  local ok, value = pcall(vim.fn.input, prompt, default or "")
+  return ok and value or nil
+end
 
 --- Say something.
 ---@param text string Already brain-named where a brain is involved

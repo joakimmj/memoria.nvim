@@ -7,6 +7,7 @@ local md_drafting = require("memoria.lib.md-drafting")
 -- binds to. The headless functions behind them are under M.core.
 M.atlas = require("memoria.ui.atlas")
 M.brain = require("memoria.ui.brain")
+M.concept = require("memoria.ui.concept")
 M.engram = require("memoria.ui.engram")
 M.synapse = require("memoria.ui.synapse")
 
@@ -15,6 +16,7 @@ M.synapse = require("memoria.ui.synapse")
 M.core = {
   atlas = require("memoria.modules.atlas"),
   brain = require("memoria.modules.brain"),
+  concept = require("memoria.modules.concept"),
   engram = require("memoria.modules.engram"),
   synapse = require("memoria.modules.synapse"),
 }

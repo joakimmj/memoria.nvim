@@ -5,7 +5,7 @@ local M = {}
 local json = require("memoria.lib.json")
 
 ---@class memoria.FilenameConfig
----@field prefix "date"|"none" What goes before the slug
+---@field prefix "date"|"concept"|"none" What goes before the slug
 ---@field separator string Between prefix and slug
 
 ---@class memoria.EngramsConfig
@@ -16,14 +16,19 @@ local json = require("memoria.lib.json")
 
 ---@class memoria.SynapseField
 ---@field target "engram"|"concept" What a value points at
+---@field concept_type? string Concept type a concept field expects; advisory, it steers pickers
 ---@field inverse? string Engram field kept in sync on the target
 ---@field list? boolean Whether the field holds more than one value
 ---@field show_empty? boolean Write the field even with no values
+
+---@class memoria.ConceptSchema
+---@field fields string[] Meta keys a concept of this type is asked for, in order
 
 ---@class memoria.Config
 ---@field add_commands boolean Create the :Mia* commands
 ---@field engrams memoria.EngramsConfig
 ---@field synapses table<string, memoria.SynapseField>
+---@field concepts table<string, memoria.ConceptSchema>
 
 ---@type memoria.Config
 M.defaults = {
@@ -35,7 +40,7 @@ M.defaults = {
     date_format = "YYYYMMDD",
 
     filename = {
-      -- "date" or "none".
+      -- "date", "concept" or "none".
       prefix = "date",
       separator = "_",
     },
@@ -54,7 +59,13 @@ M.defaults = {
   synapses = {
     up = { target = "engram", inverse = "down", list = true, show_empty = true },
     down = { target = "engram", inverse = "up", list = true, show_empty = true },
-    tags = { target = "concept" },
+    tags = { target = "concept", concept_type = "tag", list = true },
+  },
+
+  -- What a concept of each type is asked for when its meta is filled in. Any
+  -- type is allowed; one with no entry here is asked for nothing extra.
+  concepts = {
+    tag = { fields = { "description" } },
   },
 }
 
@@ -69,7 +80,7 @@ M.configured = false
 
 -- Maps whose entries are optional: a key removed from one stays removed. Every
 -- other setting is required, so removing it falls back to the built-in default.
-local OPTIONAL_ENTRIES = { synapses = true }
+local OPTIONAL_ENTRIES = { concepts = true, synapses = true }
 
 --- Merge `opts` over `defaults`: maps by key, lists replaced wholesale, and
 --- `vim.NIL` (JSON null) removing the key.
