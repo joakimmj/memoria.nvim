@@ -7,7 +7,7 @@ local config = require("memoria.config")
 local date = require("memoria.lib.date")
 local synapse = require("memoria.lib.synapse")
 
----@class memoria.AddEngramOpts
+---@class memoria.CreateEngramOpts
 ---@field title? string Title as typed; the filename uses its slug
 ---@field fields? table<string, string|string[]> Values by concept field name
 ---@field body? string Prose put where %cursor% is
@@ -16,7 +16,7 @@ local synapse = require("memoria.lib.synapse")
 ---@field path string Absolute path of the new engram
 ---@field cursor integer[] { row, col } where writing starts
 
----@alias memoria.AddEngramCode
+---@alias memoria.CreateEngramCode
 ---| "empty_slug" # The title leaves nothing a filename can use
 ---| "collision" # That filename is already taken
 ---| "prefix" # The configured filename prefix is not supported
@@ -192,11 +192,11 @@ end
 --- Create an engram in a brain. Opening it is the view's, which is why this
 --- answers where the cursor goes rather than putting it there.
 ---@param brain_name? string Default: resolved (see brain.resolve)
----@param opts? memoria.AddEngramOpts
+---@param opts? memoria.CreateEngramOpts
 ---@return memoria.NewEngram? new
 ---@return string? err
----@return memoria.AddEngramCode? code What kind of failure, when re-asking may help
-function M.add_engram(brain_name, opts)
+---@return memoria.CreateEngramCode? code What kind of failure, when re-asking may help
+function M.create_engram(brain_name, opts)
   opts = opts or {}
 
   local target, err = brain.resolve(brain_name)

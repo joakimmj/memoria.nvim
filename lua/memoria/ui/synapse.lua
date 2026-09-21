@@ -10,7 +10,7 @@ local synapse_lib = require("memoria.lib.synapse")
 --- Link the current engram to another through a synapse field, writing the
 --- inverse on the other one. Asks for whatever `opts` leaves out.
 ---@param opts? { source?: string, target?: string, field?: string }
-function M.add_synapse(opts)
+function M.attach_synapse(opts)
   opts = opts or {}
 
   local source = opts.source or vim.api.nvim_buf_get_name(0)
@@ -25,7 +25,7 @@ function M.add_synapse(opts)
   ---@param field string
   ---@param target string Engram filename
   local function finish(field, target)
-    local added, add_err = synapse.add_synapse({ source = source, field = field, target = target })
+    local added, add_err = synapse.attach_synapse({ source = source, field = field, target = target })
     if not added then
       return message.error(message.in_brain(target_brain.name, add_err --[[@as string]]))
     end

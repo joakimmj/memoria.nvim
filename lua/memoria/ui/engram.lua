@@ -17,8 +17,8 @@ end
 --- Create an engram in a brain and open it, asking for the title and asking
 --- again when the answer cannot be a filename.
 ---@param brain_name? string Brain name, default: resolved (see ui/brain.resolve)
----@param opts? memoria.AddEngramOpts
-function M.add_engram(brain_name, opts)
+---@param opts? memoria.CreateEngramOpts
+function M.create_engram(brain_name, opts)
   opts = opts or {}
 
   ui_brain.resolve(brain_name, function(target)
@@ -31,7 +31,7 @@ function M.add_engram(brain_name, opts)
         return
       end
 
-      local new, err, code = engram.add_engram(target.name, vim.tbl_extend("force", opts, { title = title }))
+      local new, err, code = engram.create_engram(target.name, vim.tbl_extend("force", opts, { title = title }))
       if new then
         vim.cmd.edit(vim.fn.fnameescape(new.path))
         return vim.api.nvim_win_set_cursor(0, new.cursor)

@@ -39,8 +39,8 @@ end
 function M.create()
   local create = vim.api.nvim_create_user_command
 
-  create("MiaBrainAdd", function(cmd)
-    ui_brain.add(cmd.fargs[1], cmd.fargs[2])
+  create("MiaBrainRegister", function(cmd)
+    ui_brain.register(cmd.fargs[1], cmd.fargs[2])
   end, { nargs = "+", complete = "dir", desc = "Register a folder as a brain" })
 
   create("MiaBrainDeregister", function(cmd)
@@ -57,12 +57,12 @@ function M.create()
     ui_brain.open_config(cmd.fargs[1])
   end, { nargs = "?", complete = complete_brains, desc = "Open a brain's .mia_dna.json" })
 
-  create("MiaEngramAdd", function(cmd)
-    ui_engram.add_engram(cmd.fargs[1])
+  create("MiaEngramCreate", function(cmd)
+    ui_engram.create_engram(cmd.fargs[1])
   end, { nargs = "?", complete = complete_brains, desc = "Create an engram" })
 
-  create("MiaSynapseAdd", function(cmd)
-    ui_synapse.add_synapse({ field = cmd.fargs[1] })
+  create("MiaSynapseAttach", function(cmd)
+    ui_synapse.attach_synapse({ field = cmd.fargs[1] })
   end, { nargs = "?", complete = complete_engram_fields, desc = "Link the current engram to another" })
 
   create("MiaAtlasRebuild", function(cmd)

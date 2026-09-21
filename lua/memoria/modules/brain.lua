@@ -88,7 +88,7 @@ end
 ---@param name? string Default: folder name
 ---@return memoria.Brain? brain
 ---@return string? err Why it could not be registered
-function M.add(path, name)
+function M.register(path, name)
   local location = absolute(path)
   name = name or vim.fs.basename(location)
 

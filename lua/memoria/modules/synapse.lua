@@ -7,7 +7,7 @@ local config = require("memoria.config")
 local file = require("memoria.lib.file")
 local synapse = require("memoria.lib.synapse")
 
----@class memoria.AddSynapseOpts
+---@class memoria.AttachSynapseOpts
 ---@field source? string Engram path, default: the current buffer's file
 ---@field target string Engram filename
 ---@field field string Engram field on the source
@@ -171,10 +171,10 @@ end
 --- the other one, and bring the atlas up to date. Given all of `source`,
 --- `field` and `target` it asks nothing and opens nothing; the pickers that
 --- fill them in are the view's.
----@param opts memoria.AddSynapseOpts
+---@param opts memoria.AttachSynapseOpts
 ---@return memoria.Synapse? synapse What was linked
 ---@return string? err
-function M.add_synapse(opts)
+function M.attach_synapse(opts)
   local located, err = M.locate(opts.source or vim.api.nvim_buf_get_name(0))
   if not located then
     return nil, err

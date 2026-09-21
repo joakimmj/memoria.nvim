@@ -126,18 +126,18 @@ differs — `:MiaBrainConfig` opens it, see `:help memoria-mia_dna.json`:
 ## 🚀 Usage
 
 ```vim
-:MiaBrainAdd ~/notes/work
+:MiaBrainRegister ~/notes/work
 :MiaBrainSwitch work
-:MiaEngramAdd
-:MiaSynapseAdd up
+:MiaEngramCreate
+:MiaSynapseAttach up
 :MiaAtlasRebuild
 :MiaBrainConfig
 ```
 
 Every command is also a Lua function, e.g.
-`require("memoria").engram.add_engram()` — bind it to a keymap and it behaves
-exactly like `:MiaEngramAdd`. The same feature without the prompts and the
-buffer is `require("memoria").core.engram.add_engram(brain, opts)`, which
+`require("memoria").engram.create_engram()` — bind it to a keymap and it behaves
+exactly like `:MiaEngramCreate`. The same feature without the prompts and the
+buffer is `require("memoria").core.engram.create_engram(brain, opts)`, which
 answers a result or `nil, err`. See `:help memoria-api`.
 
 ## 💻 CLI
@@ -150,12 +150,12 @@ its inverse.
 
 ```sh
 bin/mia --help                        # every command, in words
-bin/mia add-engram --help             # one command and what it takes
+bin/mia create-engram --help             # one command and what it takes
 bin/mia commands                      # the same, as JSON
 bin/mia brains
-bin/mia add-engram --title "Project X" --field tags=java,streams
-echo "Some prose." | bin/mia add-engram --title Notes --body -
-bin/mia add-synapse 20260801_notes.md up 20260801_project_x.md
+bin/mia create-engram --title "Project X" --field tags=java,streams
+echo "Some prose." | bin/mia create-engram --title Notes --body -
+bin/mia attach-synapse 20260801_notes.md up 20260801_project_x.md
 bin/mia check
 ```
 

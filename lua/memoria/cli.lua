@@ -255,7 +255,7 @@ M.commands = {
     end,
   },
   {
-    name = "add-engram",
+    name = "create-engram",
     description = "Create an engram, with the same header as one written in the editor",
     arguments = {
       BRAIN,
@@ -285,7 +285,7 @@ M.commands = {
           body = io.read("*a")
         end
 
-        local new, add_err = engram.add_engram(target.name, {
+        local new, add_err = engram.create_engram(target.name, {
           title = args.options.title --[[@as string]],
           fields = fields,
           body = body,
@@ -298,7 +298,7 @@ M.commands = {
     end,
   },
   {
-    name = "add-synapse",
+    name = "attach-synapse",
     description = "Link two engrams, writing the inverse on the other one",
     arguments = {
       { name = "<source>", required = true, description = "Engram the field is written on" },
@@ -309,7 +309,7 @@ M.commands = {
     run = function(args)
       return in_brain(args, function(target)
         local source = target.location .. "/" .. vim.fs.basename(args.positional[1])
-        local added, err = synapse.add_synapse({
+        local added, err = synapse.attach_synapse({
           source = source,
           field = args.positional[2],
           target = args.positional[3],

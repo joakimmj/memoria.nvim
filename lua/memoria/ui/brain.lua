@@ -11,7 +11,7 @@ local message = require("memoria.ui.message")
 function M.pick(run)
   local names = brain.names()
   if #names == 0 then
-    message.warn("no brains registered; add one with :MiaBrainAdd")
+    message.warn("no brains registered; register one with :MiaBrainRegister")
     return
   end
 
@@ -63,12 +63,12 @@ end
 --- Register a folder as a brain, creating it if missing.
 ---@param path string Folder path
 ---@param name? string Default: folder name
-function M.add(path, name)
-  local added, err = brain.add(path, name)
-  if not added then
+function M.register(path, name)
+  local registered, err = brain.register(path, name)
+  if not registered then
     return message.error(err --[[@as string]])
   end
-  message.info(("added brain '%s' at %s"):format(added.name, added.location))
+  message.info(("registered brain '%s' at %s"):format(registered.name, registered.location))
 end
 
 --- Remove a brain from the registry, picked when not named.

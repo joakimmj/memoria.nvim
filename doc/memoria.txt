@@ -23,6 +23,15 @@ CONTENTS                                                *memoria-contents*
 memoria.nvim keeps notes as plain markdown. A brain is a folder of notes; an
 engram is one note in it. Files stay readable without the plugin.
 
+                                                          *memoria-vocabulary*
+Commands and functions are named by what they do to their noun, one meaning
+per verb:
+
+    Register    record something that exists outside memoria: a brain
+                folder. Its inverse is Deregister.
+    Create      make something new: an engram
+    Attach      put a relation on the current engram: a synapse
+
 Nothing is mapped by default.
 
 ==============================================================================
@@ -120,7 +129,7 @@ when more than one brain is registered.
 ==============================================================================
 5. ENGRAMS                                               *memoria-engrams*
 
-`add_engram` prompts for a title. The title is written as typed into
+|:MiaEngramCreate| asks for a title. The title is written as typed into
 %title%; the filename uses its slug: >
 
     Note about Java
@@ -129,8 +138,8 @@ when more than one brain is registered.
 <
 The slug is lowercased, whitespace becomes `filename.separator`, and
 characters no filesystem allows (/ \ : * ? " < > |) are dropped. When the file
-already exists, or nothing usable is left, |:MiaEngramAdd| asks again with the
-title filled in and the reason in the prompt.
+already exists, or nothing usable is left, |:MiaEngramCreate| asks again with
+the title filled in and the reason in the prompt.
 
 The file gets a generated header, then the content template: >markdown
 
@@ -155,8 +164,8 @@ The buffer opens with the cursor at %cursor%.
 ==============================================================================
 6. SYNAPSES                                             *memoria-synapses*
 
-|:MiaSynapseAdd| links the current engram to another through an engram field,
-and writes the field's `inverse` on the other one: >markdown
+|:MiaSynapseAttach| links the current engram to another through an engram
+field, and writes the field's `inverse` on the other one: >markdown
 
     <!-- SYNAPSES -->
     - **down:**
@@ -199,8 +208,9 @@ SYNAPSES block from config, adding lines for fields configured since.
 
 These global commands are created unless `add_commands = false`.
 
-                                                              *:MiaBrainAdd*
-:MiaBrainAdd {path} [name]  Register {path} as a brain, creating it if
+                                                           *:MiaBrainRegister*
+:MiaBrainRegister {path} [name]
+                            Register {path} as a brain, creating it if
                             missing. [name] defaults to the folder name.
                                                        *:MiaBrainDeregister*
 :MiaBrainDeregister [name]  Remove a brain from the registry; picked when
@@ -215,11 +225,11 @@ These global commands are created unless `add_commands = false`.
                                                            *:MiaBrainConfig*
 :MiaBrainConfig [brain]     Open the brain's .mia_dna.json, creating an
                             empty one when it has none
-                                                             *:MiaEngramAdd*
-:MiaEngramAdd [brain]       Ask for a title, create an engram and open it,
+                                                            *:MiaEngramCreate*
+:MiaEngramCreate [brain]    Ask for a title, create an engram and open it,
                             asking again when the title cannot be a filename
-                                                            *:MiaSynapseAdd*
-:MiaSynapseAdd [field]      Link the current engram to another, picked,
+                                                           *:MiaSynapseAttach*
+:MiaSynapseAttach [field]   Link the current engram to another, picked,
                             through [field] (picked when not given)
                                                           *:MiaAtlasRebuild*
 :MiaAtlasRebuild[!] [brain] Rebuild the atlas and list problems in the
@@ -287,11 +297,11 @@ words. Brain-scoped commands take
                             with its file, line and kind
     rebuild [--fix]         The same; with --fix, repair what can be
                             repaired first
-    add-engram --title T [--field name=value,...] [--body text|-]
+    create-engram --title T [--field name=value,...] [--body text|-]
                             Create an engram, opening nothing. --field once
                             per concept field; --body - reads stdin, so
                             multi-line prose needs no shell quoting
-    add-synapse {source} {field} {target}
+    attach-synapse {source} {field} {target}
                             Link two engrams, writing the inverse on the
                             other one
     commands                Every command and its arguments
@@ -333,7 +343,7 @@ bind these to a keymap. `memoria.core.{feature}` is the same feature without
 any of that: it asks nothing, opens nothing, and answers a result, or nil and
 an error naming no brain. The CLI (|memoria-cli|) calls only the second.
 
-    memoria.brain.add({path}, {name})
+    memoria.brain.register({path}, {name})
         Register a folder as a brain, reporting the result.
     memoria.brain.deregister({name})
         Remove a brain from the registry; picked when not named.
@@ -352,11 +362,11 @@ an error naming no brain. The CLI (|memoria-cli|) calls only the second.
         The picker straight away when {name} is empty, for choosing a brain
         rather than acting in one.
 
-    memoria.engram.add_engram({brain}, {opts})
+    memoria.engram.create_engram({brain}, {opts})
         Ask for a title, create the engram and open it at its cursor, asking
         again when the title cannot be a filename.
 
-    memoria.synapse.add_synapse({opts})
+    memoria.synapse.attach_synapse({opts})
         Link the current engram to another. {opts}.source (path, default: the
         current buffer), {opts}.field and {opts}.target are asked for when
         left out.
@@ -367,7 +377,7 @@ an error naming no brain. The CLI (|memoria-cli|) calls only the second.
 
 Every function below answers a result, or nil and an error.
 
-    memoria.core.brain.add({path}, {name})
+    memoria.core.brain.register({path}, {name})
         Register a folder as a brain. Returns the brain.
     memoria.core.brain.deregister({name})
         Remove a brain from the registry. Files are never touched.
@@ -392,7 +402,7 @@ Every function below answers a result, or nil and an error.
     memoria.core.brain.names()
         Every brain name, sorted.
 
-    memoria.core.engram.add_engram({brain}, {opts})
+    memoria.core.engram.create_engram({brain}, {opts})
         Create an engram, opening nothing. {opts}.title is required,
         {opts}.fields fills the frontmatter, {opts}.body lands at %cursor%.
         Returns `{ path, cursor }`, or nil, an error, and a code:
@@ -404,7 +414,7 @@ Every function below answers a result, or nil and an error.
     memoria.core.engram.slugify({title}, {separator})
         The filename-safe slug of a title.
 
-    memoria.core.synapse.add_synapse({opts})
+    memoria.core.synapse.attach_synapse({opts})
         Link two engrams and refresh the atlas. {opts}.source (path),
         {opts}.field and {opts}.target are all required. Returns what it
         linked.
