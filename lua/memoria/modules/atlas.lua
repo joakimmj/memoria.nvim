@@ -40,6 +40,7 @@ local synapse = require("memoria.lib.synapse")
 ---| "unreadable_frontmatter" # Frontmatter that could not be parsed
 ---| "undeclared_concept" # A concept an engram names that the registry does not answer to
 ---| "orphaned_concept" # A registered concept no engram names
+---| "wrong_concept_type" # A concept in a field that takes another type
 
 ---@class memoria.AtlasProblem
 ---@field engram? string Filename, when an engram is what is wrong
@@ -446,7 +447,8 @@ function M.check(atlas, cfg, registry)
     if declared then
       for _, field in ipairs(concept_fields) do
         for _, mention in ipairs(entry[field] or {}) do
-          if not names[mention] then
+          local answers = names[mention]
+          if not answers then
             table.insert(problems, {
               engram = name,
               concept = mention,
@@ -455,6 +457,19 @@ function M.check(atlas, cfg, registry)
               -- than wherever the text happens to appear in the prose.
               needle = field .. ":",
               text = ("undeclared concept: %s in %s"):format(mention, field),
+            })
+          elseif not concept.accepts(cfg, field, registry[answers].type) then
+            table.insert(problems, {
+              engram = name,
+              concept = answers,
+              kind = "wrong_concept_type",
+              needle = field .. ":",
+              text = ("wrong type: %s is a %s, %s takes %s"):format(
+                answers,
+                registry[answers].type,
+                field,
+                cfg.synapses[field].concept_type or "nothing"
+              ),
             })
           end
         end

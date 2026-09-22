@@ -4,6 +4,7 @@ local M = {}
 local atlas = require("memoria.modules.atlas")
 local brain = require("memoria.modules.brain")
 local concept = require("memoria.modules.concept")
+local concept_lib = require("memoria.lib.concept")
 local config = require("memoria.config")
 local date = require("memoria.lib.date")
 local md_drafting = require("memoria.lib.md-drafting")
@@ -14,6 +15,7 @@ local synapse = require("memoria.lib.synapse")
 ---@field fields? table<string, string|string[]> Values by concept field name
 ---@field body? string Prose put where %cursor% is
 ---@field concept? string Concept the filename is prefixed with, and which is written into its field
+---@field concept_field? string Which concept field it goes in, when more than one takes its type
 
 ---@class memoria.NewEngram
 ---@field path string Absolute path of the new engram
@@ -24,6 +26,7 @@ local synapse = require("memoria.lib.synapse")
 ---| "collision" # That filename is already taken
 ---| "prefix" # The configured filename prefix is not supported
 ---| "concept" # The configured prefix needs a concept, and none was chosen
+---| "concept_field" # No field takes the concept's type, or more than one does
 
 ---@class memoria.FilenameOpts
 ---@field time? integer Epoch seconds, default now
@@ -102,7 +105,21 @@ function M.header(cfg, fields)
           return nil, ("field '%s' takes strings"):format(name)
         end
       end
-      table.insert(lines, ("%s: %s"):format(name, md_drafting.syntax.format_frontmatter_value(values or {})))
+
+      -- A field holding one value is written as one, not as a list of one;
+      -- with nothing in it the key stands alone, which reads back as empty.
+      if cfg.synapses[name].list == false then
+        if #(values or {}) > 1 then
+          return nil, ("field '%s' takes one value"):format(name)
+        end
+        table.insert(
+          lines,
+          (values or {})[1] and ("%s: %s"):format(name, md_drafting.syntax.format_frontmatter_value(values[1]))
+            or (name .. ":")
+        )
+      else
+        table.insert(lines, ("%s: %s"):format(name, md_drafting.syntax.format_frontmatter_value(values or {})))
+      end
     end
     table.insert(lines, "---")
   end
@@ -221,8 +238,21 @@ function M.create_engram(brain_name, opts)
 
     -- Never only cosmetic: a prefix the engram does not also name would be
     -- visible in a listing and invisible to everything that searches.
-    local field = concept.field_for(cfg, resolved.type)
+    local candidates = concept_lib.fields_for(cfg, resolved.type)
+    local field = opts.concept_field
     if field then
+      if not vim.tbl_contains(candidates, field) then
+        return nil, ("%s does not take a %s"):format(field, resolved.type), "concept_field"
+      end
+    elseif #candidates == 0 then
+      return nil, ("no concept field takes a %s"):format(resolved.type), "concept_field"
+    elseif #candidates > 1 then
+      return nil, ("%s take a %s; name one"):format(table.concat(candidates, ", "), resolved.type), "concept_field"
+    else
+      field = candidates[1]
+    end
+
+    do
       local given = fields[field]
       ---@type string[]
       local values = {}
@@ -236,6 +266,24 @@ function M.create_engram(brain_name, opts)
         table.insert(values, prefix)
       end
       fields[field] = cfg.synapses[field].list == false and { prefix } or values
+    end
+  end
+
+  -- What attach_concept refuses, --field cannot do either.
+  for name, given in pairs(fields) do
+    ---@type string[]
+    local values = {}
+    if type(given) == "string" then
+      values = { given }
+    elseif given then
+      values = given
+    end
+
+    for _, value in ipairs(values) do
+      local found = concept.resolve_concept(target.name, value)
+      if found and not concept_lib.accepts(cfg, name, found.type) then
+        return nil, ("%s is a %s, %s takes %s"):format(found.name, found.type, name, cfg.synapses[name].concept_type)
+      end
     end
   end
 

@@ -86,17 +86,18 @@ Every value below is the default: >lua
       synapses = {
         -- target: "engram" or "concept". show_empty writes the field
         -- even with no values. inverse: the engram field kept in sync on
-        -- the other side. list = false: one value, replaced on add.
-        -- concept_type: the concept type a concept field expects; a hint
-        -- for pickers, never a constraint.
+        -- the other side. list = false: one value, replaced on add, and
+        -- written as one rather than as a list of one.
+        -- concept_type: the one concept type a concept field takes, and
+        -- refuses the rest. Required on every concept field.
         up = { target = "engram", inverse = "down", list = true, show_empty = true },
         down = { target = "engram", inverse = "up", list = true, show_empty = true },
         tags = { target = "concept", concept_type = "tag", list = true },
       },
 
-      -- What a concept of each type is asked for when its meta is filled
-      -- in, see |memoria-concepts|. Any type is allowed; one with no entry
-      -- here is asked for nothing extra.
+      -- The concept types this brain has, and what each is asked for when
+      -- its meta is filled in, see |memoria-concepts|. A concept's type is
+      -- one of these, or one the registry already uses.
       concepts = {
         tag = { fields = { "description" } },
       },
@@ -153,10 +154,10 @@ concept name means nothing until its brain is known.
 <
 With `prefix = "concept"`, |:MiaEngramCreate| picks the concept before it asks
 for the title (|memoria-concepts-pick|). The concept is also written into the
-engram's concept field — the first whose `concept_type` is the concept's type,
-else the first expecting no type, else the first — so a prefix is never only
-cosmetic: a `java_` file nothing tags `java` would be visible in a listing and
-invisible to everything that searches.
+field taking its type, so a prefix is never only cosmetic: a `java_` file
+nothing tags `java` would be visible in a listing and invisible to everything
+that searches. With more than one field taking that type the field is picked
+too; with none, there is nowhere to write it and the engram is refused.
 The slug is lowercased, whitespace becomes `filename.separator`, and
 characters no filesystem allows (/ \ : * ? " < > |) are dropped. When the file
 already exists, or nothing usable is left, |:MiaEngramCreate| asks again with
@@ -227,10 +228,37 @@ be read and edited by hand, one key per line, keyed by name: >json
       }
     }
 <
-`type` is any string. `aliases` are other names that resolve to the same
-concept. `note` is free text. `meta` is free-form; a type's schema under
-`concepts` in |memoria-config| only decides which keys are asked for. Keyed
-by name, a registry cannot hold the same concept twice.
+`type` is one the brain has: a type given a schema under `concepts` in
+|memoria-config|, or one its registry already uses. Nothing else is offered
+or accepted, so `room` and `rooms` cannot become two types by a typo; a type
+the brain has never seen starts with a schema in the config. `aliases` are
+other names that resolve to the same concept. `note` is free text. `meta` is
+free-form, and the type's schema decides which keys are asked for. Keyed by
+name, a registry cannot hold the same concept twice.
+
+                                                      *memoria-concepts-types*
+Every concept field declares the one `concept_type` it takes, and refuses a
+concept of any other. `tags` takes tags; to put a `room` on an engram, the
+brain configures a field for rooms: >json
+
+    { "concepts": { "room": { "fields": ["floor"] } },
+      "synapses": {
+        "rooms": { "target": "concept", "concept_type": "room" }
+      } }
+<
+A concept field without a `concept_type` takes nothing, and is reported as the
+config mistake it is rather than read as a field taking anything.
+
+A field is written the shape it is declared: a list by default, and with
+`list = false` the value itself, or the bare key when it holds none. Either
+shape reads back the same, so a hand-written `room: kitchen` needs no
+ceremony: >markdown
+
+    ---
+    room: kitchen
+    tags: [java, streams]
+    ---
+<
 
 A mention resolves to the concept it is the name of, else to the concept that
 lists it as an alias. A mention nothing resolves to is undeclared — a state to
@@ -241,7 +269,7 @@ exactly as a plain label always has.
 |:MiaConceptAttach| puts a concept in one of the current engram's concept
 fields — the concept counterpart of |:MiaSynapseAttach|. The engram decides
 the brain. The field is picked when the brain has more than one, and the
-concept is picked with the field's `concept_type` listed first. A name that
+concept from the ones that field takes (|memoria-concepts-types|). A name that
 resolves is written under the concept's own name, so attaching an alias writes
 the concept; a name already there changes nothing, and a field with
 `list = false` gives up the value it held. The frontmatter line is rewritten
@@ -417,12 +445,14 @@ brain is registered (|memoria-brains|).
     rebuild [--fix]         The same; with --fix, repair what can be
                             repaired first
     create-engram --title T [--field name=value,...] [--body text|-]
-               [--concept C]
+               [--concept C] [--concept-field F]
                             Create an engram, opening nothing. --field once
                             per concept field; --body - reads stdin, so
                             multi-line prose needs no shell quoting;
                             --concept names the concept a brain with
-                            `prefix = "concept"` prefixes it with
+                            `prefix = "concept"` prefixes it with, and
+                            --concept-field which field it goes in when more
+                            than one takes its type
     attach-synapse {source} {field} {target}
                             Link two engrams, writing the inverse on the
                             other one
@@ -515,8 +545,10 @@ an error naming no brain. The CLI (|memoria-cli|) calls only the second.
     memoria.concept.pick_or_create({brain}, {opts}, {run})
         Pick a concept or register one, and pass it to {run}. {brain} is a
         resolved brain; {opts} takes `prompt`, `name` (filled into the
-        create prompt) and `concept_type` (listed first, and the default for
-        a new one). See |memoria-concepts-pick|.
+        create prompt) and `concept_type` (all this field takes, and the
+        type a new one is given). See |memoria-concepts-pick|.
+    memoria.concept.pick_field({brain}, {fields}, {run})
+        Pick which concept field to write in, and pass it to {run}.
 
     memoria.synapse.attach_synapse({opts})
         Link the current engram to another. {opts}.source (path, default: the

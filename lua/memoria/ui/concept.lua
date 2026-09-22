@@ -4,6 +4,7 @@ local M = {}
 
 local atlas = require("memoria.modules.atlas")
 local concept = require("memoria.modules.concept")
+local concept_lib = require("memoria.lib.concept")
 local config = require("memoria.config")
 local message = require("memoria.ui.message")
 local synapse = require("memoria.modules.synapse")
@@ -39,9 +40,35 @@ local function ask_meta(target, name, type, meta)
   return fields
 end
 
+--- Ask which type a new concept is, from the ones this brain has: the types
+--- its config gives a schema, and the types its registry already uses. A type
+--- nobody has declared is not offered, so one cannot be coined by a typo.
+---@param target memoria.Brain
+---@param run fun(concept_type: string) Called once picked
+local function pick_type(target, run)
+  local cfg = config.load_brain_config(target.location)
+  local types = concept_lib.types(cfg, concept_lib.read(target.location))
+  if #types == 0 then
+    return message.error(message.in_brain(target.name, "no concept types; give one a schema in the config"))
+  end
+
+  vim.ui.select(types, {
+    prompt = message.in_brain(target.name, "Type:"),
+    format_item = function(item)
+      local schema = concept.schema_fields(cfg, item)
+      return #schema > 0 and ("%s (%s)"):format(item, table.concat(schema, ", ")) or item
+    end,
+  }, function(choice)
+    if choice then
+      run(choice)
+    end
+  end)
+end
+
 --- Register a concept: its name, its type, then whatever its type is asked for.
 --- A `name` given is taken as given; a `suggest`ed one is only filled into the
---- prompt, for a mention that may want correcting before it becomes a name.
+--- prompt, for a mention that may want correcting before it becomes a name. A
+--- `concept_type` is the field's own, and settles the type without asking.
 ---@param target memoria.Brain
 ---@param opts { name?: string, suggest?: string, concept_type?: string }
 ---@param run fun(created: memoria.Concept)
@@ -54,27 +81,30 @@ local function create(target, opts, run)
     return
   end
 
-  local concept_type = message.ask(message.in_brain(target.name, "Type: "), opts.concept_type)
-  if not concept_type or vim.trim(concept_type) == "" then
-    return
+  ---@param concept_type string
+  local function finish(concept_type)
+    local fields = ask_meta(target, vim.trim(name), concept_type, {})
+    if not fields then
+      return
+    end
+
+    local created, err = concept.create_concept(target.name, name, concept_type, fields)
+    if not created then
+      return message.error(message.in_brain(target.name, err --[[@as string]]))
+    end
+    run(created)
   end
 
-  local fields = ask_meta(target, vim.trim(name), vim.trim(concept_type), {})
-  if not fields then
-    return
+  if opts.concept_type then
+    return finish(opts.concept_type)
   end
-
-  local added, err = concept.create_concept(target.name, name, concept_type, fields)
-  if not added then
-    return message.error(message.in_brain(target.name, err --[[@as string]]))
-  end
-  run(added)
+  pick_type(target, finish)
 end
 
 --- Pick a concept from the brain's registry, or register one. The interaction
 --- shared by every place a concept is chosen — see |memoria-concepts|.
 ---@param target memoria.Brain Whose registry is picked from
----@param opts? { prompt?: string, name?: string, concept_type?: string } name: suggested when creating
+---@param opts? { prompt?: string, name?: string, concept_type?: string } concept_type: all this field takes
 ---@param run fun(chosen: memoria.Concept) Called once something is chosen
 function M.pick_or_create(target, opts, run)
   opts = opts or {}
@@ -84,19 +114,19 @@ function M.pick_or_create(target, opts, run)
     return message.error(message.in_brain(target.name, err --[[@as string]]))
   end
   local creating = { suggest = opts.name, concept_type = opts.concept_type }
-  if #concepts == 0 then
+
+  -- A field takes one type, so only those are worth offering for it; without a
+  -- field to answer to, every concept is.
+  local items, by_name = {}, {}
+  for _, entry in ipairs(concepts) do
+    if not opts.concept_type or entry.type == opts.concept_type then
+      by_name[entry.name] = entry
+      table.insert(items, entry.name)
+    end
+  end
+  if #items == 0 then
     return create(target, creating, run)
   end
-
-  -- The expected type first, never alone: the type is a hint, not a filter.
-  local wanted, rest = {}, {}
-  local by_name = {}
-  for _, entry in ipairs(concepts) do
-    by_name[entry.name] = entry
-    table.insert(opts.concept_type and entry.type == opts.concept_type and wanted or rest, entry.name)
-  end
-
-  local items = vim.list_extend(wanted, rest)
   table.insert(items, CREATE)
 
   vim.ui.select(items, {
@@ -125,9 +155,21 @@ function M.create_concept(brain_name, name)
   end)
 end
 
+--- Ask which concept field to write in, when more than one takes the type.
+---@param target memoria.Brain
+---@param fields string[] The fields that take it
+---@param run fun(field: string) Called once picked
+function M.pick_field(target, fields, run)
+  vim.ui.select(fields, { prompt = message.in_brain(target.name, "Concept field:") }, function(choice)
+    if choice then
+      run(choice)
+    end
+  end)
+end
+
 --- Put a concept in one of the current engram's concept fields, asking for
---- whatever `opts` leaves out: the field, then the concept, from those of the
---- field's `concept_type` first. The engram decides the brain.
+--- whatever `opts` leaves out: the field, then the concept, from the ones that
+--- field takes. The engram decides the brain.
 ---@param opts? { source?: string, field?: string, concept?: string }
 function M.attach_concept(opts)
   opts = opts or {}
@@ -174,11 +216,7 @@ function M.attach_concept(opts)
   elseif #fields == 1 then
     pick_concept(fields[1])
   else
-    vim.ui.select(fields, { prompt = message.in_brain(target.name, "Concept field:") }, function(choice)
-      if choice then
-        pick_concept(choice)
-      end
-    end)
+    M.pick_field(target, fields, pick_concept)
   end
 end
 

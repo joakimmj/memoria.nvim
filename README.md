@@ -105,17 +105,18 @@ require("memoria").setup({
   -- Fields on an engram: target "engram" writes a link in the SYNAPSES
   -- block, "concept" a frontmatter list. show_empty writes the field even
   -- with no values. inverse is the field kept in sync on the other engram;
-  -- list = false holds one value only. concept_type is the concept type a
-  -- concept field expects, a hint for pickers. Both kinds are written sorted
-  -- by name.
+  -- list = false holds one value only, written as one. concept_type is the one
+  -- concept type a concept field takes, required on every one of them. Both
+  -- kinds are written sorted by name.
   synapses = {
     up = { target = "engram", inverse = "down", list = true, show_empty = true },
     down = { target = "engram", inverse = "up", list = true, show_empty = true },
     tags = { target = "concept", concept_type = "tag", list = true },
   },
 
-  -- What a concept of each type is asked for when its meta is filled in.
-  -- Any type is allowed; one with no entry is asked for nothing extra.
+  -- The concept types this brain has, and what each is asked for when its
+  -- meta is filled in. A concept's type is one of these, or one the registry
+  -- already uses.
   concepts = {
     tag = { fields = { "description" } },
   },
@@ -150,8 +151,10 @@ differs — `:MiaBrainConfig` opens it, see `:help memoria-mia_dna.json`:
 
 A brain's concepts live in `mia_concepts.json` beside its notes — visible,
 and meant to be edited by hand too. A person can carry an email, a tag a
-description, and a name no entry answers to is something `:MiaConceptFill`
-walks you through and `:MiaAtlasRebuild` reports. See `:help memoria-concepts`.
+description, and every concept field takes the one type it declares — to tag a
+note with a room, configure a field for rooms. A name no entry answers to is
+something `:MiaConceptFill` walks
+you through and `:MiaAtlasRebuild` reports. See `:help memoria-concepts`.
 
 Every command is also a Lua function, e.g.
 `require("memoria").engram.create_engram()` — bind it to a keymap and it behaves

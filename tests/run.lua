@@ -353,6 +353,20 @@ check(
   "tags: [java, streams]"
 )
 check("header, a scalar field value is one item", engram.header(config.get(), { tags = "java" })[2], "tags: [java]")
+
+local one_value = config.get()
+one_value.synapses = { room = { target = "concept", concept_type = "room", list = false } }
+check("header, one value is written as one", engram.header(one_value, { room = "kitchen" })[2], "room: kitchen")
+check("header, and empty stands alone", engram.header(one_value, {})[2], "room:")
+check("header, one value takes one", { engram.header(one_value, { room = { "kitchen", "hall" } }) }, {
+  nil,
+  "field 'room' takes one value",
+})
+check(
+  "header, an empty one-value field reads back empty",
+  atlas.parse_engram("x.md", engram.header(one_value, {}) --[[@as string[] ]], one_value).room,
+  {}
+)
 check(
   "header, a value that would read as structure is quoted",
   engram.header(config.get(), { tags = { "a, b", "c: d", " e " } })[2],
@@ -1030,7 +1044,14 @@ vim.fn.delete(config.brain_config_path(made.location))
 
 -- modules: concept
 
+-- A concept's type has to be one the brain has, so the brain says which.
+set_dna({ concepts = { person = { fields = { "email", "role" } }, colleague = { fields = {} } } }, made)
+
 check("concept list, empty brain", concept.list("made"), {})
+check("concept create_concept, a type the brain does not have", { concept.create_concept("made", "x", "nope") }, {
+  nil,
+  "no concept type 'nope'; this brain has colleague, person, tag",
+})
 check(
   "concept create_concept, registers",
   concept.create_concept("made", "java", "tag", { description = "Java notes" }),
@@ -1091,11 +1112,44 @@ check("concept add_alias, a name that already resolves elsewhere", { concept.add
 check("concept get, unknown", { concept.get("made", "nope") }, { nil, "no concept 'nope'" })
 check("concept list, unknown brain", { concept.list("nope") }, { nil, "no brain 'nope'" })
 
-check("concept field_for, by type", concept.field_for(config.get(), "tag"), "tags")
-check("concept field_for, an unmatched type falls back", concept.field_for(config.get(), "person"), "tags")
-local no_fields = config.get()
-no_fields.synapses = { up = { target = "engram" } }
-check("concept field_for, no concept field at all", concept.field_for(no_fields, "tag"), nil)
+check("concept fields_for, the field taking it", concept_lib.fields_for(config.get(), "tag"), { "tags" })
+check("concept fields_for, a type no field takes", concept_lib.fields_for(config.get(), "person"), {})
+check("concept fields_for, no type", concept_lib.fields_for(config.get(), nil), {})
+
+local two_fields = config.get()
+two_fields.synapses = {
+  up = { target = "engram" },
+  tags = { target = "concept", concept_type = "tag" },
+  topics = { target = "concept", concept_type = "tag" },
+  people = { target = "concept", concept_type = "person" },
+  loose = { target = "concept" },
+}
+check("concept fields_for, every field taking it, sorted", concept_lib.fields_for(two_fields, "tag"), {
+  "tags",
+  "topics",
+})
+check("concept accepts, its own type", concept_lib.accepts(two_fields, "tags", "tag"), true)
+check("concept accepts, another type", concept_lib.accepts(two_fields, "tags", "person"), false)
+check("concept accepts, a name with no entry has no type", concept_lib.accepts(two_fields, "tags", nil), true)
+check(
+  "concept accepts, a field declaring no type takes nothing",
+  concept_lib.accepts(two_fields, "loose", "tag"),
+  false
+)
+check("concept accepts, not a field at all", concept_lib.accepts(two_fields, "nope", "tag"), false)
+check("config untyped_concept_fields", config.untyped_concept_fields(two_fields), { "loose" })
+check("config untyped_concept_fields, none", config.untyped_concept_fields(config.get()), {})
+
+check("concept types, from the config's schemas", concept_lib.types(config.get(), {}), { "tag" })
+check(
+  "concept types, and from the registry",
+  concept_lib.types(config.get(), {
+    Alice = { type = "person" },
+    bedroom = { type = "room" },
+    loose = {},
+  }),
+  { "person", "room", "tag" }
+)
 
 check("concept ensure_registry, answers the path", concept.ensure_registry("made"), concept_lib.path(made.location))
 
@@ -1140,9 +1194,9 @@ check("check, a brain that declared nothing hears nothing about concepts", #atla
 local made_disk = json.read(atlas.path(made.location))
 made_disk.engrams[vim.fs.basename(new.path)].title = "sentinel"
 json.write(atlas.path(made.location), made_disk)
-concept.create_concept("made", "gizmo", "widget")
+concept.create_concept("made", "gizmo", "tag")
 local rederived = atlas.refresh(made) --[[@as memoria.Atlas]]
-check("refresh, a registry edit re-derives", rederived.concepts_by_type.widget, { "gizmo" })
+check("refresh, a registry edit re-derives", rederived.concepts_by_type.tag, { "gizmo", "java", "lua" })
 check("refresh, a registry edit re-parses nothing", rederived.engrams[vim.fs.basename(new.path)].title, "sentinel")
 local without_gizmo = concept_lib.read(made.location)
 without_gizmo.gizmo = nil
@@ -1194,6 +1248,7 @@ check(
 set_dna({
   engrams = { filename = { prefix = "concept" } },
   synapses = { participants = { target = "concept", concept_type = "person" } },
+  concepts = { person = { fields = {} } },
 }, prefixed)
 concept.create_concept("prefixed", "alice", "person")
 local meeting = engram.create_engram("prefixed", { title = "Meeting", concept = "alice" }) --[[@as memoria.NewEngram]]
@@ -1201,7 +1256,6 @@ check("create_engram, a concept lands in the field of its type", vim.list_slice(
   "participants: [alice]",
   "tags: []",
 })
-set_dna({ engrams = { filename = { prefix = "concept" } } }, prefixed)
 
 -- modules: concept, attaching
 
@@ -1213,17 +1267,30 @@ check(
 )
 check("attach_concept, one already there changes nothing", vim.fn.readfile(new.path)[2], "tags: [java, streams]")
 check(
-  "attach_concept, appends to the field",
-  concept.attach_concept({ source = streams, field = "tags", concept = "alice" }).concept,
+  "attach_concept, a field takes only its own type",
+  { concept.attach_concept({ source = streams, field = "tags", concept = "alice" }) },
+  { nil, "alice is a person, tags takes tag" }
+)
+check(
+  "attach_concept, appends to the field that takes it",
+  concept.attach_concept({ source = streams, field = "participants", concept = "alice" }).concept,
   "alice"
 )
-check("attach_concept, what it wrote", vim.fn.readfile(streams)[2], "tags: [java, alice]")
+check(
+  "attach_concept, what it wrote",
+  md_drafting.syntax.parse_frontmatter(vim.fn.readfile(streams)).participants,
+  { "alice" }
+)
 check(
   "attach_concept, a name nothing declares goes in as given",
   concept.attach_concept({ source = streams, field = "tags", concept = "bare tag" }).concept,
   "bare tag"
 )
-check("attach_concept, and is written like any other", vim.fn.readfile(streams)[2], "tags: [java, alice, bare tag]")
+check(
+  "attach_concept, and is written like any other",
+  md_drafting.syntax.parse_frontmatter(vim.fn.readfile(streams)).tags,
+  { "java", "bare tag" }
+)
 check("attach_concept, the atlas has it", atlas.refresh(prefixed).concepts["bare tag"], { "java_streams.md" })
 check(
   "attach_concept, a field that is not configured",
@@ -1240,6 +1307,21 @@ check(
   { concept.attach_concept({ source = streams, field = "tags", concept = " " }) },
   { nil, "a concept is required" }
 )
+set_dna({
+  engrams = { filename = { prefix = "concept" } },
+  synapses = { participants = { target = "concept", concept_type = "person" }, loose = { target = "concept" } },
+  concepts = { person = { fields = {} } },
+}, prefixed)
+check(
+  "attach_concept, a field declaring no concept_type takes nothing",
+  { concept.attach_concept({ source = streams, field = "loose", concept = "java" }) },
+  { nil, "concept field 'loose' declares no concept_type" }
+)
+set_dna({
+  engrams = { filename = { prefix = "concept" } },
+  synapses = { participants = { target = "concept", concept_type = "person" } },
+  concepts = { person = { fields = {} } },
+}, prefixed)
 check(
   "attach_concept, outside a brain",
   { concept.attach_concept({ source = scratch .. "/elsewhere/x.md", field = "tags", concept = "x" }) },
@@ -1267,41 +1349,54 @@ vim.fn.delete(prefixed.location .. "/scalar.md")
 
 set_dna({
   engrams = { filename = { prefix = "concept" } },
-  synapses = { owner = { target = "concept", concept_type = "person", list = false } },
+  synapses = {
+    participants = { target = "concept", concept_type = "person" },
+    owner = { target = "concept", concept_type = "person", list = false },
+  },
+  concepts = { person = { fields = {} } },
 }, prefixed)
-concept.attach_concept({ source = streams, field = "owner", concept = "java" })
+concept.create_concept("prefixed", "bob", "person")
+concept.attach_concept({ source = streams, field = "owner", concept = "bob" })
 check(
   "attach_concept, a field missing from the frontmatter is added",
   md_drafting.syntax.parse_frontmatter(vim.fn.readfile(streams)).owner,
-  { "java" }
+  "bob"
+)
+check(
+  "attach_concept, list = false is written as one value",
+  vim.tbl_filter(function(line)
+    return line:match("^owner:")
+  end, vim.fn.readfile(streams)),
+  { "owner: bob" }
 )
 concept.attach_concept({ source = streams, field = "owner", concept = "alice" })
 check(
   "attach_concept, list = false replaces",
   md_drafting.syntax.parse_frontmatter(vim.fn.readfile(streams)).owner,
-  { "alice" }
+  "alice"
 )
 
--- One concept field: straight to the concept, its type first.
+-- One concept field: straight to the concept, and only what that field takes.
 set_dna({ engrams = { filename = { prefix = "concept" } } }, prefixed)
 vim.cmd.edit(vim.fn.fnameescape(streams))
-selects, choices = {}, { "alice" }
+selects, choices = {}, { "java" }
 vim.cmd("MiaConceptAttach")
-check("MiaConceptAttach, the field's type first", selects, {
-  { prompt = "(prefixed) tags:", labels = { "java (tag)", "alice (person)", "+ Create new concept" } },
+check("MiaConceptAttach, only the concepts the field takes", selects, {
+  { prompt = "(prefixed) tags:", labels = { "java (tag)", "+ Create new concept" } },
 })
-check("MiaConceptAttach, reports what it attached", notified, "memoria: (prefixed) java_streams.md tags → alice")
+check("MiaConceptAttach, reports what it attached", notified, "memoria: (prefixed) java_streams.md tags → java")
 
--- Several: the field is picked first, and each field's own type leads.
+-- Several: the field is picked first, and each field offers its own type.
 set_dna({
   engrams = { filename = { prefix = "concept" } },
   synapses = { owner = { target = "concept", concept_type = "person", list = false } },
+  concepts = { person = { fields = {} } },
 }, prefixed)
 selects, choices = {}, { "owner", "alice" }
 vim.cmd("MiaConceptAttach")
 check("MiaConceptAttach, picks the field, then the concept", selects, {
   { prompt = "(prefixed) Concept field:", labels = { "owner", "tags" } },
-  { prompt = "(prefixed) owner:", labels = { "alice (person)", "java (tag)", "+ Create new concept" } },
+  { prompt = "(prefixed) owner:", labels = { "alice (person)", "bob (person)", "+ Create new concept" } },
 })
 selects = {}
 vim.cmd("MiaConceptAttach tags")
@@ -1312,17 +1407,99 @@ check("MiaConceptAttach, an engram field is refused", notified, "memoria: (prefi
 set_dna({ engrams = { filename = { prefix = "concept" } } }, prefixed)
 vim.cmd("enew")
 
+-- modules: engram, which field a concept prefix writes in
+
+set_dna({
+  engrams = { filename = { prefix = "concept" } },
+  synapses = { participants = { target = "concept", concept_type = "person" } },
+  concepts = { person = { fields = {} } },
+}, prefixed)
+check("create_engram, no field takes the type", { engram.create_engram("prefixed", { title = "X", concept = "x" }) }, {
+  nil,
+  "undeclared concept 'x'",
+  "concept",
+})
+
+set_dna({
+  engrams = { filename = { prefix = "concept" } },
+  synapses = {
+    participants = { target = "concept", concept_type = "person" },
+    guests = { target = "concept", concept_type = "person" },
+  },
+  concepts = { person = { fields = {} } },
+}, prefixed)
+check("create_engram, two fields take the type", {
+  engram.create_engram("prefixed", { title = "Standup", concept = "alice" }),
+}, { nil, "guests, participants take a person; name one", "concept_field" })
+check("create_engram, a field that does not take it", {
+  engram.create_engram("prefixed", { title = "Standup", concept = "alice", concept_field = "tags" }),
+}, { nil, "tags does not take a person", "concept_field" })
+
+local standup = engram.create_engram("prefixed", {
+  title = "Standup",
+  concept = "alice",
+  concept_field = "guests",
+}) --[[@as memoria.NewEngram]]
+check(
+  "create_engram, the named field is the one written",
+  md_drafting.syntax.parse_frontmatter(vim.fn.readfile(standup.path)).guests,
+  { "alice" }
+)
+check("create_engram, a concept a field refuses is refused with --field too", {
+  engram.create_engram(
+    "prefixed",
+    { title = "Other", concept = "alice", concept_field = "guests", fields = {
+      tags = { "alice" },
+    } }
+  ),
+}, { nil, "alice is a person, tags takes tag" })
+
+-- The editor asks which field, and creates with the answer.
+vim.cmd.edit(vim.fn.fnameescape(streams))
+selects, choices, prompts, answers = {}, { "alice", "participants" }, {}, { "Retro" }
+vim.cmd("MiaEngramCreate prefixed")
+check("MiaEngramCreate, asks which field takes the concept", selects[#selects], {
+  prompt = "(prefixed) Concept field:",
+  labels = { "guests", "participants" },
+})
+check(
+  "MiaEngramCreate, writes the field it was given",
+  md_drafting.syntax.parse_frontmatter(vim.fn.readfile(prefixed.location .. "/alice_retro.md")).participants,
+  { "alice" }
+)
+vim.cmd("enew")
+
+-- modules: atlas, a concept in a field that takes another type
+
+vim.fn.writefile({ "---", "tags: [alice]", "---", "# Wrong" }, prefixed.location .. "/wrong.md")
+local wrong = atlas.rebuild_atlas("prefixed") --[[@as memoria.RebuildResult]]
+local mismatched = vim.tbl_filter(function(problem)
+  return problem.kind == "wrong_concept_type"
+end, wrong.problems)
+check("check, a concept in a field that takes another type", mismatched[1], {
+  engram = "wrong.md",
+  concept = "alice",
+  kind = "wrong_concept_type",
+  needle = "tags:",
+  text = "wrong type: alice is a person, tags takes tag",
+})
+check("check, at the field's row", atlas.locate_problems(prefixed, mismatched)[1].line, 2)
+vim.fn.delete(prefixed.location .. "/wrong.md")
+
 -- ui: concepts
 
 local ui_concept = require("memoria.ui.concept")
 vim.cmd("MiaBrainSwitch made")
 
-prompts, answers = {}, { "rust", "tag", "Rust notes" }
+prompts, answers, selects, choices = {}, { "rust", "Rust notes" }, {}, { "tag" }
 vim.cmd("MiaConceptCreate")
 check("MiaConceptCreate, prompts name the brain", prompts, {
   "(made) Concept name: ",
-  "(made) Type: ",
   "(made) rust description: ",
+})
+check("MiaConceptCreate, the type is picked from the ones the brain has", selects[1], {
+  prompt = "(made) Type:",
+  labels = { "colleague", "person (email, role)", "tag (description)" },
 })
 check("MiaConceptCreate, what it registered", concept.get("made", "rust").meta, { description = "Rust notes" })
 
@@ -1344,9 +1521,9 @@ check("MiaConceptEdit, the brain came from the argument", #vim.tbl_filter(functi
   return select.prompt == "Brain:"
 end, selects), 0)
 
-prompts, answers = {}, { "tag", "" }
+prompts, answers, selects, choices = {}, { "" }, {}, { "tag" }
 ui_concept.create_concept("made", "zig")
-check("create_concept, a given name is not asked again", prompts, { "(made) Type: ", "(made) zig description: " })
+check("create_concept, a given name is not asked again", prompts, { "(made) zig description: " })
 check("create_concept, registered under the given name", concept.get("made", "zig").type, "tag")
 local without_zig = concept_lib.read(made.location)
 without_zig.zig = nil
@@ -1478,7 +1655,8 @@ check(
     "  tasks [--brain <name>] [--state <state>]",
     "  check [--brain <name>]",
     "  rebuild [--brain <name>] [--fix]",
-    "  create-engram [--brain <name>] --title <title> [--field <name=value>] [--body <text>] [--concept <name>]",
+    "  create-engram [--brain <name>] --title <title> [--field <name=value>] [--body <text>] [--concept <name>] "
+      .. "[--concept-field <name>]",
     "  attach-synapse <source> <field> <target> [--brain <name>]",
     "  create-concept [--brain <name>] --name <name> --type <type> [--meta <name=value>]",
     "  edit-concept [--brain <name>] --name <name> [--type <type>] [--meta <name=value>]",
@@ -1490,7 +1668,7 @@ check("usage, one command leads with its own line", cli.usage("engram")[1], "eng
 check("usage, a required argument is bare", usage("engram"):find("<file>   ", 1, true) ~= nil, true)
 check("usage, a required option says so", usage("create-engram"):find("(required)", 1, true) ~= nil, true)
 check("usage, a repeated option says so", usage("create-engram"):find("(repeatable)", 1, true) ~= nil, true)
-check("usage, every argument is explained", select(2, usage("create-engram"):gsub("\n  %-%-", "")), 5)
+check("usage, every argument is explained", select(2, usage("create-engram"):gsub("\n  %-%-", "")), 6)
 check("usage, a command with no arguments", cli.usage("brains"), {
   "brains",
   "",
@@ -1710,6 +1888,26 @@ check(
   "java_from_cli.md"
 )
 check(
+  "cli create-engram, two fields take the concept's type",
+  ran({ "create-engram", "--brain", "prefixed", "--title", "Sprint", "--concept", "alice" }),
+  "(prefixed) guests, participants take a person; name one"
+)
+check(
+  "cli create-engram --concept-field",
+  vim.fs.basename(ran({
+    "create-engram",
+    "--brain",
+    "prefixed",
+    "--title",
+    "Sprint",
+    "--concept",
+    "alice",
+    "--concept-field",
+    "guests",
+  }).path),
+  "alice_sprint.md"
+)
+check(
   "cli create-engram, a concept brain without --concept",
   ran({ "create-engram", "--brain", "prefixed", "--title", "X" }),
   "(prefixed) a concept is required"
@@ -1791,7 +1989,7 @@ check(
   helped_one.out:match("^[^\n]*"),
   table.concat({
     "create-engram [--brain <name>] --title <title>",
-    "[--field <name=value>] [--body <text>] [--concept <name>]",
+    "[--field <name=value>] [--body <text>] [--concept <name>] [--concept-field <name>]",
   }, " ")
 )
 check("bin/mia <command> --help, its arguments", helped_one.out:find("(repeatable)", 1, true) ~= nil, true)
@@ -1811,6 +2009,18 @@ check("bin/mia, no config at all", missing.out.error:find("no config at", 1, tru
 local alone = mia_run({ "brains" }, { env = { MEMORIA_INIT = "NONE" } })
 check("bin/mia NONE, without md-drafting", alone.code, 1)
 check("bin/mia NONE, names the dependency", alone.out.error:find("md-drafting.nvim", 1, true) ~= nil, true)
+
+-- setup: a concept field takes the type it declares, so one declaring none is
+-- worth saying once rather than at every write that refuses it.
+local options_before = config.options
+notified = nil
+require("memoria").setup({ synapses = { loose = { target = "concept" } } })
+check(
+  "setup, a concept field with no concept_type is reported",
+  notified,
+  "memoria: concept fields with no concept_type take nothing: loose"
+)
+config.options = options_before
 
 vim.fn.delete(scratch, "rf")
 

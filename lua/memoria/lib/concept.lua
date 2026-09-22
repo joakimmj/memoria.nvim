@@ -127,6 +127,58 @@ function M.by_type(registry)
   return by_type
 end
 
+--- The concept types a brain knows: the types its config gives a schema, and
+--- the types its registry already uses. A type nobody has declared is not one.
+---@param cfg memoria.Config Brain config
+---@param registry memoria.ConceptRegistry
+---@return string[] types Sorted
+function M.types(cfg, registry)
+  local seen = {}
+  for name in pairs(cfg.concepts) do
+    seen[name] = true
+  end
+  for _, entry in pairs(registry) do
+    if type(entry.type) == "string" and entry.type ~= "" then
+      seen[entry.type] = true
+    end
+  end
+
+  local types = vim.tbl_keys(seen)
+  table.sort(types)
+  return types
+end
+
+--- Whether a concept field takes a concept of this type. A field takes the one
+--- type it declares; a name the registry does not answer to has no type, and so
+--- contradicts nothing — it stays the plain label it has always been.
+---@param cfg memoria.Config Brain config
+---@param field string Concept field name
+---@param concept_type? string The concept's own type, nil when it has none
+---@return boolean
+function M.accepts(cfg, field, concept_type)
+  local expects = (cfg.synapses[field] or {}).concept_type
+  if not expects then
+    return false
+  end
+  return concept_type == nil or concept_type == expects
+end
+
+--- The concept fields taking this type, sorted. None is an answer: no field
+--- does, and nothing guesses one that does not.
+---@param cfg memoria.Config Brain config
+---@param concept_type? string
+---@return string[] fields
+function M.fields_for(cfg, concept_type)
+  local fields = {}
+  for name, field in pairs(cfg.synapses) do
+    if field.target == "concept" and concept_type and field.concept_type == concept_type then
+      table.insert(fields, name)
+    end
+  end
+  table.sort(fields)
+  return fields
+end
+
 --- What the derived data depends on, so an edit to the registry is noticed.
 ---@param registry memoria.ConceptRegistry
 ---@return string fingerprint

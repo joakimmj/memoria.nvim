@@ -2,6 +2,8 @@
 -- the title, then open the file.
 local M = {}
 
+local concept = require("memoria.modules.concept")
+local concept_lib = require("memoria.lib.concept")
 local config = require("memoria.config")
 local engram = require("memoria.modules.engram")
 local message = require("memoria.ui.message")
@@ -48,12 +50,32 @@ function M.create_engram(brain_name, opts)
   ui_brain.resolve(brain_name, function(target)
     local cfg = config.load_brain_config(target.location)
 
-    -- The concept is chosen before the title, so re-asking a title that
-    -- collides never asks for the concept again.
-    if cfg.engrams.filename.prefix == "concept" and not opts.concept then
-      return ui_concept.pick_or_create(target, { prompt = "Filename concept" }, function(chosen)
-        ask_title(target, vim.tbl_extend("force", opts, { concept = chosen.name }))
+    --- The field the prefix concept is also written into, asked for only when
+    --- the brain has more than one taking that type.
+    ---@param chosen memoria.Concept
+    local function with_field(chosen)
+      local candidates = concept_lib.fields_for(cfg, chosen.type)
+      local next_opts = vim.tbl_extend("force", opts, { concept = chosen.name })
+      if #candidates < 2 or next_opts.concept_field then
+        return ask_title(target, next_opts)
+      end
+      ui_concept.pick_field(target, candidates, function(field)
+        ask_title(target, vim.tbl_extend("force", next_opts, { concept_field = field }))
       end)
+    end
+
+    -- Everything the filename needs is chosen before the title, so re-asking a
+    -- title that collides never asks for any of it again.
+    if cfg.engrams.filename.prefix == "concept" then
+      if not opts.concept then
+        return ui_concept.pick_or_create(target, { prompt = "Filename concept" }, with_field)
+      end
+
+      local found, err = concept.resolve_concept(target.name, opts.concept)
+      if not found then
+        return message.error(message.in_brain(target.name, err --[[@as string]]))
+      end
+      return with_field(found)
     end
     ask_title(target, opts)
   end)

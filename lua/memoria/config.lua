@@ -16,7 +16,7 @@ local json = require("memoria.lib.json")
 
 ---@class memoria.SynapseField
 ---@field target "engram"|"concept" What a value points at
----@field concept_type? string Concept type a concept field expects; advisory, it steers pickers
+---@field concept_type? string Concept type a concept field takes; required on a concept field
 ---@field inverse? string Engram field kept in sync on the target
 ---@field list? boolean Whether the field holds more than one value
 ---@field show_empty? boolean Write the field even with no values
@@ -62,8 +62,9 @@ M.defaults = {
     tags = { target = "concept", concept_type = "tag", list = true },
   },
 
-  -- What a concept of each type is asked for when its meta is filled in. Any
-  -- type is allowed; one with no entry here is asked for nothing extra.
+  -- The concept types this brain has, and what each is asked for when its meta
+  -- is filled in. A concept's type is one of these, or one the registry already
+  -- uses; every concept field takes exactly one of them.
   concepts = {
     tag = { fields = { "description" } },
   },
@@ -123,6 +124,22 @@ function M.get()
   local merged = M.merge(M.defaults, M.options)
   restore_required(merged, M.defaults)
   return merged
+end
+
+--- Concept fields declaring no `concept_type`, sorted. A concept field takes
+--- one type and refuses the rest, so one without a type takes nothing: it is a
+--- mistake in the config rather than a field that accepts anything.
+---@param cfg memoria.Config
+---@return string[] fields
+function M.untyped_concept_fields(cfg)
+  local fields = {}
+  for name, field in pairs(cfg.synapses) do
+    if field.target == "concept" and not field.concept_type then
+      table.insert(fields, name)
+    end
+  end
+  table.sort(fields)
+  return fields
 end
 
 --- Where a brain's own overrides live.

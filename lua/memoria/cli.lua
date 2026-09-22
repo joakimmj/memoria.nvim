@@ -346,6 +346,11 @@ M.commands = {
         value = "name",
         description = "Concept the filename is prefixed with, when the prefix is 'concept'",
       },
+      {
+        name = "--concept-field",
+        value = "name",
+        description = "Which concept field it goes in, when more than one takes its type",
+      },
     },
     run = function(args)
       return in_brain(args, function(target)
@@ -364,6 +369,7 @@ M.commands = {
           fields = fields,
           body = body,
           concept = args.options.concept --[[@as string?]],
+          concept_field = args.options["concept-field"] --[[@as string?]],
         })
         if not new then
           return nil, add_err

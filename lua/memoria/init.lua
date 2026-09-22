@@ -34,6 +34,16 @@ function M.setup(opts)
 
   config.options = opts or {}
 
+  -- A concept field takes the one type it declares, so one declaring none takes
+  -- nothing: said once here rather than at every write that then refuses it.
+  local untyped = config.untyped_concept_fields(config.get())
+  if #untyped > 0 then
+    vim.notify(
+      ("memoria: concept fields with no concept_type take nothing: %s"):format(table.concat(untyped, ", ")),
+      vim.log.levels.WARN
+    )
+  end
+
   if config.get().add_commands then
     require("memoria.commands").create()
   end

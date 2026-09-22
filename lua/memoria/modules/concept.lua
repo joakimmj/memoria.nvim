@@ -172,6 +172,18 @@ function M.set_concept_meta(brain_name, name, type, fields)
   end
   name = vim.trim(name)
 
+  if type and vim.trim(type) ~= "" then
+    local cfg = config.load_brain_config(target.location)
+    local known = concept.types(cfg, registry)
+    if not vim.tbl_contains(known, vim.trim(type)) then
+      return nil,
+        ("no concept type '%s'; this brain has %s"):format(
+          vim.trim(type),
+          #known > 0 and table.concat(known, ", ") or "none"
+        )
+    end
+  end
+
   local entry = registry[name]
   if not entry then
     if not type or vim.trim(type) == "" then
@@ -326,7 +338,19 @@ function M.attach_concept(opts)
   if mention == "" then
     return nil, "a concept is required"
   end
-  local name = concept.resolve(concept.read(target.location), mention) or mention
+  local registry = concept.read(target.location)
+  local resolved = concept.resolve(registry, mention)
+  local name = resolved or mention
+
+  -- A field takes the one type it declares. A name the registry does not answer
+  -- to has no type, so it contradicts nothing and goes in as written.
+  local expects = field.concept_type
+  local concept_type = resolved and registry[resolved].type or nil
+  if not expects then
+    return nil, ("concept field '%s' declares no concept_type"):format(opts.field)
+  elseif not concept.accepts(cfg, opts.field, concept_type) then
+    return nil, ("%s is a %s, %s takes %s"):format(name, concept_type, opts.field, expects)
+  end
 
   local path = target.location .. "/" .. located.filename
   local lines = file.read_lines(path)
@@ -341,11 +365,12 @@ function M.attach_concept(opts)
 
   local values = as_list(fields and fields[opts.field])
   if not vim.tbl_contains(values, name) then
-    values = field.list == false and { name } or vim.list_extend(values, { name })
+    -- A field holding one value is written as one, and gives up what it held.
+    local value = field.list == false and name or vim.list_extend(values, { name })
 
     -- md-drafting refuses a field it cannot rewrite whole (a block scalar, a
     -- nested mapping, a key written twice) rather than leave half of it behind.
-    local written, set_err = md_drafting.syntax.set_frontmatter_field(lines, opts.field, values)
+    local written, set_err = md_drafting.syntax.set_frontmatter_field(lines, opts.field, value)
     if not written then
       return nil, ("%s: %s"):format(located.filename, set_err)
     end
@@ -386,24 +411,6 @@ function M.unknown_fields(cfg, type, fields)
   end
   table.sort(unknown)
   return unknown
-end
-
---- Which concept field a concept of this type belongs in: the first expecting
---- that type, else the first expecting none, else the first there is.
----@param cfg memoria.Config Brain config
----@param type? string Concept type
----@return string? field Nil when the brain has no concept field at all
-function M.field_for(cfg, type)
-  local fields = synapse.field_names(cfg.synapses, "concept")
-  local untyped
-  for _, name in ipairs(fields) do
-    local expects = cfg.synapses[name].concept_type
-    if type and expects == type then
-      return name
-    end
-    untyped = untyped or (not expects and name or nil)
-  end
-  return untyped or fields[1]
 end
 
 return M
