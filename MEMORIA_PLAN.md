@@ -155,7 +155,9 @@ Adds the entity layer: persons, tags-with-metadata, and everything that
 depends on being able to resolve a name to something.
 
 **Ships:**
-- `mia_concepts.json`, concept type schemas, `resolve_concept` (§6.1–6.3)
+- `mia_concepts.json`, concept type schemas, `resolve_concept` (§6.1–6.3). A
+  concept's type is one the brain has, and every concept field takes the one
+  type it declares (§5.2)
 - `find_undeclared_concepts` / `set_concept_meta` (§6.4)
 - Concept-prefix filenames (§4.1) — unblocked now that there's a registry to
   pick from or create into

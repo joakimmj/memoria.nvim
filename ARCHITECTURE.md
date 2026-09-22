@@ -1978,7 +1978,7 @@ Each synapse field is declared under `synapses` in config:
 |---|---|
 | `target` | `"engram"` (relative link to another engram) or `"concept"` (name/alias, resolved against `mia_concepts.json`) |
 | `concept_type` | (target: concept only) which concept `type` this field expects, e.g. `"person"`, `"tag"`. Advisory, not enforced — see below. |
-| `list` | whether multiple values are allowed |
+| `list` | whether multiple values are allowed. `false` also writes the value itself rather than a list of one — `room: kitchen`, or a bare `room:` when empty — which reads back the same either way |
 | `inverse` | (target: engram only) the paired field to auto-sync, e.g. `up ↔ down` |
 | `show_empty` | whether the field's line always appears, even with no values (default: `true`) |
 
@@ -1998,10 +1998,22 @@ object; a field resolving against `mia_concepts.json` can). A tag that's never
 given a `mia_concepts.json` entry behaves exactly as a plain label always has —
 metadata is opt-in, not required.
 
-`concept_type` is a UI hint, not a constraint: it filters/pre-fills the concept
-picker (§4.1, §6.4) so adding to `participants` surfaces `person`-type concepts
-first and defaults new entries to `type: "person"`, but nothing stops a
-different-typed concept being added to a field if you want it there.
+`concept_type` is **required on every concept field, and is a constraint**: the
+field takes that one type and refuses every other, so `participants` holds
+people and `tags` holds tags. It is what the config has to say "only people
+belong here" with, and a field declaring none takes nothing — a mistake
+reported at `setup()` rather than a field read as taking anything.
+
+Putting a `room` on an engram therefore means configuring a field for rooms
+(`rooms = { target = "concept", concept_type = "room" }`), not writing one into
+`tags`. Only a name the registry does not answer to is free: it has no type, so
+it contradicts no field and stays the plain label a bare tag has always been —
+`check` reports it as undeclared (§7.2), which is the state `:MiaConceptFill`
+exists to clear.
+
+The field also decides what its pickers offer (§4.1, §6.4): attaching to
+`participants` lists `person` concepts and nothing else, and a concept created
+there is a `person` without being asked.
 
 ### 5.3 Format rules
 
@@ -2157,7 +2169,10 @@ Flat object, visible (not hidden), hand-editable:
 }
 ```
 
-- `type` — required, any string, not restricted to configured types
+- `type` — required, and one the brain has: a type with a schema under
+  `concepts` (§6.2), or one the registry already uses. Nothing else is offered
+  or accepted, so a type cannot be coined by a typo; a genuinely new one starts
+  with its schema in the config
 - `aliases`, `note` — optional
 - `meta` — free-form, shaped (advisory only) by `concepts[type].fields` in config
 - Written two-space indented with keys sorted, one per line: it is the file
@@ -2177,9 +2192,10 @@ Flat object, visible (not hidden), hand-editable:
 }
 ```
 
-Purely advisory — drives UI form fields when editing a concept's `meta`. Any
-`type` string is allowed even without a schema entry (falls back to a
-generic/blank form).
+Drives UI form fields when editing a concept's `meta`, and is the list a type
+is picked from (§6.1): the schema keys, plus the types the registry already
+uses. A type with an entry here but no fields asks for nothing beyond the
+name and the type.
 
 Only `tag = { fields = { "description" } }` ships as a default, since `tags` is
 the one concept field that ships (§5.2); `person` above is an example, for the
@@ -2404,7 +2420,8 @@ rebuild_atlas(brain):
 result as deleting `.mia_atlas.json` first — and answers `{ atlas, problems }`
 (`nil, err` when the brain cannot be read). Each problem carries a `kind` —
 `broken_synapse`, `missing_inverse`, `broken_link`, `unreadable_frontmatter`,
-`undeclared_concept`, `orphaned_concept` — and `locate_problems(brain,
+`undeclared_concept`, `wrong_concept_type`, `orphaned_concept` — and
+`locate_problems(brain,
 problems)` resolves each one's file and row, reading every file it names once.
 
 The two concept kinds differ in what they belong to:
@@ -2412,15 +2429,18 @@ The two concept kinds differ in what they belong to:
 - `undeclared_concept` — one per engram naming it, reported with that engram's
   other rows, anchored on the concept field's frontmatter line (`tags:`) rather
   than wherever the text next appears in the prose.
+- `wrong_concept_type` — a concept in a field that takes another type (§5.2),
+  anchored on the same line and naming both types. Only a hand-edited engram
+  can hold one: every command and the CLI refuse to write it.
 - `orphaned_concept` — belongs to no engram. It carries `concept` and no
   `engram`, and `locate_problems` points it at `mia_concepts.json`, on the line
   of its quoted key — the line you would delete. An alias naming it counts as
   a reference.
 
-Both are reported **only once the registry holds a concept**. A brain that has
+All three are reported **only once the registry holds a concept**. A brain that has
 declared nothing is not told that everything it writes is undeclared, which
 would otherwise happen the moment an empty `{}` registry appeared. Declaring
-one concept opts the brain in. Neither has a `repair`: registering needs a type
+one concept opts the brain in. None has a `repair`: registering needs a type
 nobody can invent, and deleting an entry is destructive, so
 `:MiaAtlasRebuild!` leaves both in the report and `:MiaConceptFill` (§6.4) is
 the fixer for the first. `:MiaAtlasRebuild` is it as a command, and the
