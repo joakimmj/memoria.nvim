@@ -64,7 +64,7 @@ function M.attach_synapse(opts)
     end)
   end
 
-  local fields = synapse_lib.field_names(cfg.synapses, "engram")
+  local fields = synapse_lib.field_names(cfg.synapses)
   if opts.field then
     if not vim.tbl_contains(fields, opts.field) then
       return message.error(message.in_brain(target_brain.name, ("no engram field '%s'"):format(opts.field)))

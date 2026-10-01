@@ -3,8 +3,10 @@
 local M = {}
 
 local brain = require("memoria.modules.brain")
+local concept = require("memoria.lib.concept")
 local config = require("memoria.config")
 local file = require("memoria.lib.file")
+local frontmatter = require("memoria.lib.frontmatter")
 local json = require("memoria.lib.json")
 local md_drafting = require("memoria.lib.md-drafting")
 local synapse = require("memoria.lib.synapse")
@@ -25,9 +27,11 @@ local synapse = require("memoria.lib.synapse")
 
 ---@class memoria.Atlas
 ---@field config string Fingerprint of the config the entries were parsed with
+---@field concept_registry string Fingerprint of the registry the derived maps came from
 ---@field engrams table<string, memoria.AtlasEngram> By filename
 ---@field backlinks table<string, string[]> Filename to the engrams linking it
----@field concepts table<string, string[]> Concept name to the engrams naming it
+---@field concepts table<string, string[]> Concept key (or undeclared mention) to the engrams naming it
+---@field concepts_by_type table<string, string[]> Registered concepts by type, sorted
 ---@field tasks { not_done: memoria.AtlasTask[], done: memoria.AtlasTask[] }
 
 ---@alias memoria.AtlasProblemKind
@@ -35,16 +39,22 @@ local synapse = require("memoria.lib.synapse")
 ---| "missing_inverse" # A synapse the other engram does not answer
 ---| "broken_link" # A body link pointing at an engram that is not there
 ---| "unreadable_frontmatter" # Frontmatter that could not be parsed
+---| "undeclared_concept" # A concept an engram names that the registry does not answer to
+---| "orphaned_concept" # A registered concept no engram names
+---| "wrong_concept_type" # A concept in a field that takes another type
+---| "non_canonical_mention" # A concept not written the way its field writes concepts
 
 ---@class memoria.AtlasProblem
----@field engram string Filename
+---@field engram? string Filename, when an engram is what is wrong
+---@field concept? string Concept key or mention, when a concept is what is wrong
 ---@field kind memoria.AtlasProblemKind What is wrong
 ---@field text string What is wrong, in words
 ---@field needle? string Text on the offending line, to find its row
 ---@field repair? { source: string, target: string, field: string } Missing inverse to write
+---@field rewrite? string Concept field to rewrite in its form
 
 ---@class memoria.LocatedProblem : memoria.AtlasProblem
----@field file string Absolute path
+---@field file string Absolute path of the engram, or of the concept registry
 ---@field line integer 1-indexed row, 1 when no line says so
 
 ---@class memoria.RebuildResult
@@ -66,25 +76,13 @@ end
 local function empty()
   return {
     config = "",
+    concept_registry = "",
     engrams = {},
     backlinks = {},
     concepts = {},
+    concepts_by_type = {},
     tasks = { not_done = {}, done = {} },
   }
-end
-
---- A frontmatter value as a list: nil and "" are empty, a scalar is one item.
----@param value any Frontmatter field value
----@return string[]
-local function as_list(value)
-  if type(value) == "table" then
-    return vim.tbl_filter(function(item)
-      return type(item) == "string"
-    end, value)
-  elseif type(value) == "string" and value ~= "" then
-    return { value }
-  end
-  return {}
 end
 
 --- The engram filename a link points at, when it points at one in this brain.
@@ -104,7 +102,7 @@ function M.engram_target(path)
 end
 
 --- Index one engram. Pure: lines in, entry and tasks out.
----@param filename string e.g. "20260801_project-x.md"
+---@param filename string e.g. "2026-08-01_project_x.md"
 ---@param lines string[] Engram lines
 ---@param cfg memoria.Config Brain config
 ---@return memoria.AtlasEngram entry Without `modified`/`hash`
@@ -116,9 +114,9 @@ function M.parse_engram(filename, lines, cfg)
     entry.error = err
   end
 
-  for _, name in ipairs(synapse.field_names(cfg.synapses, "concept")) do
+  for _, name in ipairs(frontmatter.field_names(cfg.frontmatter, "concept")) do
     if not RESERVED[name] then
-      entry[name] = as_list(fields and fields[name])
+      entry[name] = frontmatter.as_list(fields and fields[name])
     end
   end
 
@@ -173,7 +171,7 @@ end
 ---@param cfg memoria.Config
 ---@return string
 local function fingerprint(cfg)
-  return vim.fn.sha256(vim.inspect({ cfg.synapses, cfg.engrams.task_markers })):sub(1, 16)
+  return vim.fn.sha256(vim.inspect({ cfg.synapses, cfg.frontmatter, cfg.engrams.task_markers })):sub(1, 16)
 end
 
 --- Read a brain's atlas; a missing or unreadable one is empty.
@@ -190,6 +188,9 @@ local function read(location)
     return empty()
   end
   atlas.tasks = type(atlas.tasks) == "table" and atlas.tasks or {}
+  -- An atlas written before concepts had a registry: re-derive once.
+  atlas.concept_registry = type(atlas.concept_registry) == "string" and atlas.concept_registry or ""
+  atlas.concepts_by_type = type(atlas.concepts_by_type) == "table" and atlas.concepts_by_type or {}
   return atlas
 end
 
@@ -213,9 +214,11 @@ local function write(location, atlas)
 
   local ok, err = json.write(M.path(location), {
     config = atlas.config,
+    concept_registry = atlas.concept_registry,
     engrams = object(engrams),
     backlinks = object(atlas.backlinks),
     concepts = object(atlas.concepts),
+    concepts_by_type = object(atlas.concepts_by_type),
     tasks = atlas.tasks,
   })
   if not ok then
@@ -235,12 +238,16 @@ local function add_to(map, key, value)
   end
 end
 
---- Recompute `backlinks` and `concepts` from the entries.
+--- Recompute `backlinks`, `concepts` and `concepts_by_type` from the entries
+--- and the registry. A mention is indexed under the concept it resolves to, so
+--- an engram writing an alias or a display name still counts for the concept.
 ---@param atlas memoria.Atlas
 ---@param cfg memoria.Config
-local function derive(atlas, cfg)
+---@param registry memoria.ConceptRegistry
+local function derive(atlas, cfg, registry)
   atlas.backlinks, atlas.concepts = {}, {}
-  local concept_fields = synapse.field_names(cfg.synapses, "concept")
+  atlas.concepts_by_type = concept.by_type(registry)
+  local concept_fields = frontmatter.field_names(cfg.frontmatter, "concept")
 
   for name, entry in pairs(atlas.engrams) do
     for _, targets in pairs(entry.synapses) do
@@ -252,8 +259,8 @@ local function derive(atlas, cfg)
       add_to(atlas.backlinks, target, name)
     end
     for _, field in ipairs(concept_fields) do
-      for _, concept in ipairs(entry[field] or {}) do
-        add_to(atlas.concepts, concept, name)
+      for _, mention in ipairs(entry[field] or {}) do
+        add_to(atlas.concepts, concept.resolve(registry, mention) or mention, name)
       end
     end
   end
@@ -287,11 +294,18 @@ function M.refresh(target, opts)
   end
 
   local cfg = config.load_brain_config(target.location)
+  local registry = concept.read(target.location)
   local old = opts.full and empty() or read(target.location)
   local atlas = empty()
   atlas.config = fingerprint(cfg)
+  atlas.concept_registry = concept.hash(registry)
+
+  -- A config change re-parses every engram; a registry change cannot, since it
+  -- says nothing about how an engram is written — only about what is derived.
   local stale = atlas.config ~= old.config
-  local changed = stale or vim.fn.filereadable(M.path(target.location)) == 0
+  local changed = stale
+    or atlas.concept_registry ~= old.concept_registry
+    or vim.fn.filereadable(M.path(target.location)) == 0
 
   local parsed = {}
   for name, kind in vim.fs.dir(target.location) do
@@ -341,7 +355,7 @@ function M.refresh(target, opts)
     end)
   end
 
-  derive(atlas, cfg)
+  derive(atlas, cfg, registry)
   local ok, err = write(target.location, atlas)
   if not ok then
     return nil, err
@@ -349,16 +363,24 @@ function M.refresh(target, opts)
   return atlas
 end
 
---- Everything wrong with a brain's links, in filename order.
+--- Everything wrong with a brain's links and concepts, in filename order and
+--- then by concept. Concepts are only reported against a registry that holds
+--- something: a brain that has declared nothing is not told that everything it
+--- writes is undeclared.
 ---@param atlas memoria.Atlas
 ---@param cfg memoria.Config Brain config
+---@param registry? memoria.ConceptRegistry Default: none, and no concept is reported
 ---@return memoria.AtlasProblem[]
-function M.check(atlas, cfg)
-  local problems = {}
-  local names = vim.tbl_keys(atlas.engrams)
-  table.sort(names)
+function M.check(atlas, cfg, registry)
+  registry = registry or {}
+  local declared = next(registry) ~= nil
+  local concept_fields = frontmatter.field_names(cfg.frontmatter, "concept")
 
-  for _, name in ipairs(names) do
+  local problems = {}
+  local engram_names = vim.tbl_keys(atlas.engrams)
+  table.sort(engram_names)
+
+  for _, name in ipairs(engram_names) do
     local entry = atlas.engrams[name]
     if entry.error then
       table.insert(
@@ -372,8 +394,7 @@ function M.check(atlas, cfg)
     for _, field in ipairs(fields) do
       local needle = ("**%s:**"):format(field)
       local inverse = (cfg.synapses[field] or {}).inverse
-      local inverse_field = inverse and cfg.synapses[inverse]
-      if not (inverse_field and inverse_field.target == "engram") then
+      if not (inverse and cfg.synapses[inverse]) then
         inverse = nil
       end
 
@@ -408,25 +429,160 @@ function M.check(atlas, cfg)
         })
       end
     end
+
+    if declared then
+      for _, field in ipairs(concept_fields) do
+        local form = concept.form(cfg, field)
+        -- The frontmatter key, so the row is the field's own line rather than
+        -- wherever the text happens to appear in the prose.
+        local needle = field .. ":"
+        local canonical = false
+
+        for _, mention in ipairs(entry[field] or {}) do
+          local key = concept.resolve(registry, mention)
+          if not key then
+            table.insert(problems, {
+              engram = name,
+              concept = mention,
+              kind = "undeclared_concept",
+              needle = needle,
+              text = ("undeclared concept: %s in %s"):format(mention, field),
+            })
+          else
+            if not concept.accepts(cfg, field, registry[key].type) then
+              table.insert(problems, {
+                engram = name,
+                concept = key,
+                kind = "wrong_concept_type",
+                needle = needle,
+                text = ("wrong type: %s is a %s, %s takes %s"):format(
+                  key,
+                  registry[key].type,
+                  field,
+                  cfg.frontmatter[field].concept_type
+                ),
+              })
+            end
+            local text = concept.text_for(key, registry[key], form)
+            if mention ~= text then
+              table.insert(problems, {
+                engram = name,
+                concept = key,
+                kind = "non_canonical_mention",
+                needle = needle,
+                text = ("not in %s form: %s in %s, written %s"):format(form, mention, field, text),
+                -- One rewrite per field puts every value in its form at once.
+                rewrite = not canonical and field or nil,
+              })
+              canonical = true
+            end
+          end
+        end
+      end
+    end
+  end
+
+  local registered = vim.tbl_keys(registry)
+  table.sort(registered)
+  for _, name in ipairs(registered) do
+    -- The concepts map is keyed by what a mention resolves to, so every
+    -- spelling of a concept already counts under its key.
+    if #(atlas.concepts[name] or {}) == 0 then
+      table.insert(problems, {
+        concept = name,
+        kind = "orphaned_concept",
+        -- How both json.write and a hand-written file spell the key.
+        needle = ('"%s"'):format(name),
+        text = "orphaned concept: " .. name,
+      })
+    end
   end
 
   return problems
 end
 
---- Write every missing inverse, and regenerate every existing SYNAPSES block
---- from config so fields added since it was written get their line.
+--- Rewrite one concept field of an engram in the field's form.
+---@param target memoria.Brain
+---@param cfg memoria.Config
+---@param registry memoria.ConceptRegistry
+---@param filename string Engram filename
+---@param field string Concept field
+---@return boolean rewritten Whether the file changed
+local function rewrite_field(target, cfg, registry, filename, field)
+  local path = target.location .. "/" .. filename
+  local lines = file.read_lines(path)
+  if not lines then
+    return false
+  end
+  local fields = md_drafting.syntax.parse_frontmatter(lines)
+  if not fields then
+    return false
+  end
+
+  local values = concept.canonical_list(registry, concept.form(cfg, field), frontmatter.as_list(fields[field]))
+  local written = frontmatter.set_field(lines, field, cfg.frontmatter[field], values)
+  if written and not vim.deep_equal(written, lines) then
+    return file.write_lines(path, written) == true
+  end
+  return false
+end
+
+--- The rebuild's concept-form repair, for some engrams only: every concept
+--- field there not in its form is rewritten, as `:MiaAtlasRebuild!` would.
+--- What registering a concept runs on the engrams naming it.
+---@param target memoria.Brain
+---@param filenames string[] Engrams to repair
+---@return string[]? rewritten The filenames that changed
+---@return string? err
+function M.fix_forms(target, filenames)
+  local atlas, err = M.refresh(target)
+  if not atlas then
+    return nil, err
+  end
+
+  local cfg = config.load_brain_config(target.location)
+  local registry = concept.read(target.location)
+  local wanted, rewritten = {}, {}
+  for _, filename in ipairs(filenames) do
+    wanted[filename] = true
+  end
+
+  for _, problem in ipairs(M.check(atlas, cfg, registry)) do
+    if problem.rewrite and wanted[problem.engram] then
+      if rewrite_field(target, cfg, registry, problem.engram, problem.rewrite) then
+        rewritten[problem.engram] = true
+      end
+    end
+  end
+
+  local _, refresh_err = M.refresh(target)
+  if refresh_err then
+    return nil, refresh_err
+  end
+  local names = vim.tbl_keys(rewritten)
+  table.sort(names)
+  return names
+end
+
+--- Write every missing inverse, rewrite every concept field not in its form,
+--- and regenerate every existing SYNAPSES block from config so fields added
+--- since it was written get their line.
 ---@param target memoria.Brain
 ---@param problems memoria.AtlasProblem[]
-local function fix(target, problems)
+---@param registry memoria.ConceptRegistry
+local function fix(target, problems, registry)
   local synapse_module = require("memoria.modules.synapse")
+  local cfg = config.load_brain_config(target.location)
   for _, problem in ipairs(problems) do
     local repair = problem.repair
     if repair then
       synapse_module.connect(target, repair.source, repair.target, repair.field)
     end
+    if problem.rewrite and problem.engram then
+      rewrite_field(target, cfg, registry, problem.engram, problem.rewrite)
+    end
   end
 
-  local cfg = config.load_brain_config(target.location)
   for name, kind in vim.fs.dir(target.location) do
     if kind == "file" and name:match("%.md$") then
       local path = target.location .. "/" .. name
@@ -451,7 +607,8 @@ function M.locate_problems(target, problems)
   local located = {}
 
   for _, problem in ipairs(problems) do
-    local path = target.location .. "/" .. problem.engram
+    -- A problem naming no engram is the registry's, not an engram's.
+    local path = problem.engram and (target.location .. "/" .. problem.engram) or concept.path(target.location)
     if lines_of[path] == nil then
       lines_of[path] = file.read_lines(path) or {}
     end
@@ -474,7 +631,7 @@ end
 --- Rebuild a brain's atlas from scratch and check it. Reporting is the view's
 --- (the quickfix list) and the CLI's (JSON).
 ---@param brain_name? string Default: resolved (see brain.resolve)
----@param opts? { fix?: boolean } fix: write missing inverses and backfill blocks first
+---@param opts? { fix?: boolean } fix: write missing inverses, rewrite concepts into their field's form and backfill blocks first
 ---@return memoria.RebuildResult? result
 ---@return string? err
 function M.rebuild_atlas(brain_name, opts)
@@ -491,13 +648,14 @@ function M.rebuild_atlas(brain_name, opts)
   end
 
   local cfg = config.load_brain_config(target.location)
+  local registry = concept.read(target.location)
   if opts.fix then
     -- A repair that cannot be written stays in the problems below.
-    fix(target, M.check(atlas, cfg))
+    fix(target, M.check(atlas, cfg, registry), registry)
     atlas = M.refresh(target) --[[@as memoria.Atlas]]
   end
 
-  return { atlas = atlas, problems = M.check(atlas, cfg) }
+  return { atlas = atlas, problems = M.check(atlas, cfg, registry) }
 end
 
 return M

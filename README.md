@@ -5,20 +5,25 @@ Memoria is a note-taking system built around a simple idea: \
 
 - A **brain** is a folder of notes — one for work, one personal, one per project.
 - An **engram** is a single note — a meeting record, a recipe, a project plan.
-- A **synapse** is a link from a note — to another note, or to a concept.
+- A **synapse** is a link from one note to another.
 - A **concept** is anything you reference that isn't itself a note — a person, a topic, a tag.
 
-A brain holds engrams, connected to each other and to concepts through synapses.
+A brain holds engrams, connected to each other through synapses and to
+concepts through their frontmatter.
 
 Full reference: `:help memoria`.
 
 ## ✨ Features
 
 - **Brains:** Register any folder as a brain, list them, switch between them.
-- **Engrams:** Create a note with a dated or plain filename, a generated
-  frontmatter and synapse header, and your own content template.
+- **Engrams:** Create a note with a dated, concept or plain filename, a
+  generated frontmatter and synapse header, and your own content template.
+  Set a frontmatter value on it with one command.
 - **Synapses:** Link two notes with one command; the inverse link (`up` ↔
   `down`) is written on the other note too.
+- **Concepts:** Give the people, tags and topics your notes name an entry of
+  their own — a type, aliases, an email or a description — and find the names
+  nothing has declared yet.
 - **Atlas:** A derived index of every brain — titles, links, backlinks, tags,
   tasks — kept up to date on its own and rebuildable at any time, with a
   consistency report of broken links and one-sided synapses.
@@ -77,15 +82,19 @@ require("memoria").setup({
   add_commands = true,
 
   engrams = {
-    -- Tokens: YYYY, YY, MM, DD, HH, mm, ss. Used by the filename prefix
-    -- and %date%.
-    date_format = "YYYYMMDD",
+    -- Tokens: YYYY, YY, MM, DD, HH, mm, ss. Used by %date%, in the template
+    -- and in a frontmatter field's default.
+    date_format = "YYYY-MM-DD",
+
+    -- How a concept field writes a concept: "slug" (its key) or
+    -- "display_name". A field's own concept_form wins.
+    concept_form = "slug",
 
     filename = {
-      -- "date" or "none".
+      -- "date", "concept" or "none".
       prefix = "date",
-      -- Between the prefix and the slug, and for spaces in the slug.
-      separator = "_",
+      -- Tokens as above, for the "date" prefix.
+      date_format = "YYYY-MM-DD",
     },
 
     -- Prose under the generated header. %cursor% marks where typing starts;
@@ -99,22 +108,38 @@ require("memoria").setup({
     },
   },
 
-  -- Fields on an engram: target "engram" writes a link in the SYNAPSES
-  -- block, "concept" a frontmatter list. show_empty writes the field even
-  -- with no values. inverse is the field kept in sync on the other engram;
-  -- list = false holds one value only. Both kinds are written sorted by name.
+  -- Engram-to-engram links, in the SYNAPSES block. show_empty writes the
+  -- field even with no values; inverse is the field kept in sync on the
+  -- other engram; list = false holds one value only (list defaults to
+  -- true).
   synapses = {
-    up = { target = "engram", inverse = "down", list = true, show_empty = true },
-    down = { target = "engram", inverse = "up", list = true, show_empty = true },
-    tags = { target = "concept" },
+    up = { inverse = "down", list = true, show_empty = true },
+    down = { inverse = "up", list = true, show_empty = true },
+  },
+
+  -- Frontmatter fields. kind "concept" resolves against the brain's
+  -- concepts, "value" is plain text. concept_type is the one type a concept
+  -- field takes (left out, every type); default is what a new engram's value
+  -- field holds; list = false holds one value, written as itself (list
+  -- defaults to true). Written sorted by name.
+  frontmatter = {
+    created = { kind = "value", list = false, default = "%date%" },
+    tags = { kind = "concept", concept_type = "tag", list = true },
+  },
+
+  -- The concept types this brain has, and what each is asked for when its
+  -- meta is filled in. A concept's type is one of these, or one the registry
+  -- already uses.
+  concepts = {
+    tag = { fields = { "description" } },
   },
 })
 ```
 
 Maps merge by key, so one `filename` entry leaves the rest alone. Lists
-replace wholesale. `vim.NIL` (`null` in JSON) removes a key: a synapse field
-disappears, any other setting goes back to its built-in default —
-`synapses = { up = vim.NIL }` drops `up`.
+replace wholesale. `vim.NIL` (`null` in JSON) removes a key: a synapse or
+frontmatter field disappears, any other setting goes back to its built-in
+default — `synapses = { up = vim.NIL }` drops `up`.
 
 A brain can override any of it in its own `.mia_dna.json`, holding only what
 differs — `:MiaBrainConfig` opens it, see `:help memoria-mia_dna.json`:
@@ -130,9 +155,20 @@ differs — `:MiaBrainConfig` opens it, see `:help memoria-mia_dna.json`:
 :MiaBrainSwitch work
 :MiaEngramCreate
 :MiaSynapseAttach up
+:MiaConceptAttach tags
+:MiaFrontmatterEdit created 2026-08-01
+:MiaConceptRegister
 :MiaAtlasRebuild
 :MiaBrainConfig
 ```
+
+A brain's concepts live in `mia_concepts.json` beside its notes — visible,
+and meant to be edited by hand too. Each is keyed by a slug (`alice_smith`)
+and shown by its display name (`Alice Smith`); a person can carry an email, a
+tag a description. A concept field with a `concept_type` takes only that type,
+one without takes any. A name no entry answers to is something
+`:MiaConceptRegister` walks you through and `:MiaAtlasRebuild` reports. See
+`:help memoria-concepts`.
 
 Every command is also a Lua function, e.g.
 `require("memoria").engram.create_engram()` — bind it to a keymap and it behaves
@@ -150,12 +186,17 @@ its inverse.
 
 ```sh
 bin/mia --help                        # every command, in words
-bin/mia create-engram --help             # one command and what it takes
+bin/mia create-engram --help          # one command and what it takes
 bin/mia commands                      # the same, as JSON
 bin/mia brains
 bin/mia create-engram --title "Project X" --field tags=java,streams
 echo "Some prose." | bin/mia create-engram --title Notes --body -
-bin/mia attach-synapse 20260801_notes.md up 20260801_project_x.md
+bin/mia attach-synapse 2026-08-01_notes.md up 2026-08-01_project_x.md
+bin/mia concepts --undeclared
+bin/mia create-concept --name Java --type tag --meta description="Java notes"
+bin/mia edit-concept --name java --meta description="The JVM kind"
+bin/mia attach-concept 2026-08-01_notes.md tags java
+bin/mia edit-frontmatter 2026-08-01_notes.md created 2026-07-31
 bin/mia check
 ```
 

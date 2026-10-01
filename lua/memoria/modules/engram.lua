@@ -3,14 +3,20 @@ local M = {}
 
 local atlas = require("memoria.modules.atlas")
 local brain = require("memoria.modules.brain")
+local concept = require("memoria.modules.concept")
+local concept_lib = require("memoria.lib.concept")
 local config = require("memoria.config")
 local date = require("memoria.lib.date")
+local frontmatter = require("memoria.lib.frontmatter")
+local slug = require("memoria.lib.slug")
 local synapse = require("memoria.lib.synapse")
 
 ---@class memoria.CreateEngramOpts
 ---@field title? string Title as typed; the filename uses its slug
----@field fields? table<string, string|string[]> Values by concept field name
+---@field fields? table<string, string|string[]> Values by frontmatter field name
 ---@field body? string Prose put where %cursor% is
+---@field concept? string Concept the filename is prefixed with, and which is written into its field
+---@field concept_field? string Which concept field it goes in, when more than one takes its type
 
 ---@class memoria.NewEngram
 ---@field path string Absolute path of the new engram
@@ -20,91 +26,134 @@ local synapse = require("memoria.lib.synapse")
 ---| "empty_slug" # The title leaves nothing a filename can use
 ---| "collision" # That filename is already taken
 ---| "prefix" # The configured filename prefix is not supported
+---| "concept" # The configured prefix needs a concept, and none was chosen
+---| "concept_field" # No field takes the concept's type, or more than one does
 
---- Filename for a slug under the configured prefix.
+---@class memoria.FilenameOpts
+---@field time? integer Epoch seconds, default now
+---@field concept? string Concept key the "concept" prefix uses, as it is
+
+---@class memoria.TemplateVars
+---@field title string Title as typed
+---@field date string Today, per engrams.date_format
+
+---@class memoria.HeaderOpts
+---@field vars? memoria.TemplateVars What a value field's default expands with
+---@field registry? memoria.ConceptRegistry What concept values resolve against
+
+--- Filename for a slug under the configured prefix, joined with "_", the
+--- character the slug is made of.
 ---@param cfg memoria.Config Brain config
----@param slug string User-typed slug
----@param time? integer Epoch seconds, default now
----@return string? filename Nil when the prefix mode is unsupported
+---@param name string Slug of the title
+---@param opts? memoria.FilenameOpts
+---@return string? filename Nil when the prefix cannot be used
 ---@return string? err Why not
-function M.filename(cfg, slug, time)
-  local opts = cfg.engrams.filename
-  local prefix = opts.prefix or "none"
+---@return memoria.CreateEngramCode? code What kind of failure
+function M.filename(cfg, name, opts)
+  opts = opts or {}
+  local filename = cfg.engrams.filename
+  local prefix = filename.prefix or "none"
 
   if prefix == "date" then
-    return date.format(cfg.engrams.date_format, time) .. opts.separator .. slug .. ".md"
+    return date.format(filename.date_format, opts.time) .. "_" .. name .. ".md"
   elseif prefix == "none" then
-    return slug .. ".md"
+    return name .. ".md"
+  elseif prefix == "concept" then
+    if not opts.concept or opts.concept == "" then
+      return nil, "a concept is required", "concept"
+    end
+    -- A key is a slug already.
+    return opts.concept .. "_" .. name .. ".md"
   end
-  return nil, ("filename prefix '%s' is not supported"):format(prefix)
+  return nil, ("filename prefix '%s' is not supported"):format(prefix), "prefix"
 end
 
--- Characters no filename may hold on common filesystems.
-local UNSAFE = '[/\\:*?"<>|]'
-
---- Filename-safe slug from a title: lowercased, whitespace to `separator`.
----@param title string e.g. "Note about Java"
----@param separator string e.g. "_"
----@return string slug e.g. "note_about_java"; "" when nothing usable is left
-function M.slugify(title, separator)
-  local sep = vim.pesc(separator)
-  local slug = vim.fn.tolower(vim.trim(title)):gsub(UNSAFE, ""):gsub("%s+", separator)
-
-  -- Repeated separators, and separators or dots at either end.
-  slug = slug:gsub(sep .. "+", separator)
-  local edge = "[%." .. sep .. "]"
-  return (slug:gsub("^" .. edge .. "+", ""):gsub(edge .. "+$", ""))
-end
-
--- What a flow-list item cannot hold unquoted: the list's own punctuation, a
--- quote, a mapping colon, or whitespace at either end.
-local NEEDS_QUOTES = "[%[%],:\"'\n]"
-
---- One item of a frontmatter flow list, quoted when it would otherwise read as
---- structure rather than text.
----@param value string
+--- Expand %title% and %date% in a text.
+---@param text string
+---@param vars memoria.TemplateVars
 ---@return string
-local function flow_value(value)
-  if not value:find(NEEDS_QUOTES) and value == vim.trim(value) then
-    return value
-  end
-  return '"' .. value:gsub('[\\"]', "\\%0") .. '"'
+function M.render_placeholders(text, vars)
+  -- Function replacements, so "%" in a value is not a pattern escape.
+  return (
+    text
+      :gsub("%%title%%", function()
+        return vars.title
+      end)
+      :gsub("%%date%%", function()
+        return vars.date
+      end)
+  )
 end
 
---- Frontmatter and SYNAPSES block, straight from config, with `fields`' values
---- in the frontmatter. Each part is left out when it has no fields.
+--- A field's given values as a list of strings.
+---@param name string Field name
+---@param given any
+---@return string[]? values
+---@return string? err
+local function given_list(name, given)
+  if type(given) == "string" then
+    return { given }
+  elseif given ~= nil and (type(given) ~= "table" or not vim.islist(given)) then
+    return nil, ("field '%s' takes strings"):format(name)
+  end
+  for _, value in ipairs(given or {}) do
+    if type(value) ~= "string" then
+      return nil, ("field '%s' takes strings"):format(name)
+    end
+  end
+  return given or {}
+end
+
+--- Frontmatter and SYNAPSES block, straight from config. A value field holds
+--- what `fields` gives it, else its default expanded, else nothing; a concept
+--- field holds what `fields` gives it, each concept written in the field's form
+--- and of a type the field takes. Each part is left out when it has no fields.
 ---@param cfg memoria.Config Brain config
----@param fields? table<string, string|string[]> Values by concept field name
+---@param fields? table<string, string|string[]> Values by frontmatter field name
+---@param opts? memoria.HeaderOpts
 ---@return string[]? lines
 ---@return string? err Why a field was refused
-function M.header(cfg, fields)
-  local lines = {}
-  local concept_fields = synapse.field_names(cfg.synapses, "concept")
+function M.header(cfg, fields, opts)
+  fields = fields or {}
+  opts = opts or {}
+  local vars = opts.vars or { title = "", date = date.format(cfg.engrams.date_format) }
+  local registry = opts.registry or {}
 
-  for name in pairs(fields or {}) do
-    if not vim.tbl_contains(concept_fields, name) then
-      return nil, ("no concept field '%s'"):format(name)
+  for name in pairs(fields) do
+    if not cfg.frontmatter[name] then
+      return nil, ("no frontmatter field '%s'"):format(name)
     end
   end
 
-  if #concept_fields > 0 then
+  local lines = {}
+  local names = frontmatter.field_names(cfg.frontmatter)
+  if #names > 0 then
     table.insert(lines, "---")
-    for _, name in ipairs(concept_fields) do
-      local values = (fields or {})[name]
-      if type(values) == "string" then
-        values = { values }
-      elseif values ~= nil and not vim.islist(values) then
-        return nil, ("field '%s' takes strings"):format(name)
+    for _, name in ipairs(names) do
+      local field = cfg.frontmatter[name]
+      local values, err = given_list(name, fields[name])
+      if not values then
+        return nil, err
       end
 
-      local items = {}
-      for _, value in ipairs(values or {}) do
-        if type(value) ~= "string" then
-          return nil, ("field '%s' takes strings"):format(name)
+      if field.kind == "concept" then
+        for _, value in ipairs(values) do
+          local key = concept_lib.resolve(registry, value)
+          local concept_type = key and registry[key].type or nil
+          if not concept_lib.accepts(cfg, name, concept_type) then
+            return nil, ("%s is a %s, %s takes %s"):format(key, concept_type, name, field.concept_type)
+          end
         end
-        table.insert(items, flow_value(value))
+        values = concept_lib.canonical_list(registry, concept_lib.form(cfg, name), values)
+      elseif fields[name] == nil and type(field.default) == "string" then
+        values = { M.render_placeholders(field.default, vars) }
       end
-      table.insert(lines, ("%s: [%s]"):format(name, table.concat(items, ", ")))
+
+      local line, line_err = frontmatter.format_field(name, field, values)
+      if not line then
+        return nil, line_err
+      end
+      table.insert(lines, line)
     end
     table.insert(lines, "---")
   end
@@ -134,18 +183,11 @@ end
 
 --- Expand a content template.
 ---@param template string With %title%, %date%, %cursor%
----@param vars { title: string, date: string }
+---@param vars memoria.TemplateVars
 ---@return string[] lines Rendered, %cursor% stripped
 ---@return integer[] cursor { row, col }: 1-indexed row, 0-indexed col
 function M.render_template(template, vars)
-  -- Function replacements, so "%" in a value is not a pattern escape.
-  local text = template
-    :gsub("%%title%%", function()
-      return vars.title
-    end)
-    :gsub("%%date%%", function()
-      return vars.date
-    end)
+  local text = M.render_placeholders(template, vars)
 
   local lines, cursor
   local at = text:find("%cursor%", 1, true)
@@ -205,9 +247,47 @@ function M.create_engram(brain_name, opts)
   end
 
   local cfg = config.load_brain_config(target.location)
-  local _, unsupported = M.filename(cfg, "")
+  local registry = concept_lib.read(target.location)
+  local fields = vim.deepcopy(opts.fields or {})
+
+  -- The prefix concept is resolved before anything is written, so the filename
+  -- starts with the registry's key whatever mention was given.
+  local prefix
+  if cfg.engrams.filename.prefix == "concept" then
+    if not opts.concept or vim.trim(opts.concept) == "" then
+      return nil, "a concept is required", "concept"
+    end
+
+    local resolved, resolve_err = concept.resolve_concept(target.name, vim.trim(opts.concept))
+    if not resolved then
+      return nil, resolve_err, "concept"
+    end
+    prefix = resolved.key
+
+    -- Never only cosmetic: a prefix the engram does not also name would be
+    -- visible in a listing and invisible to everything that searches.
+    local candidates = concept_lib.fields_for(cfg, resolved.type)
+    local field = opts.concept_field
+    if field then
+      if not vim.tbl_contains(candidates, field) then
+        return nil, ("%s does not take a %s"):format(field, resolved.type), "concept_field"
+      end
+    elseif #candidates == 0 then
+      return nil, ("no concept field takes a %s"):format(resolved.type), "concept_field"
+    elseif #candidates > 1 then
+      return nil, ("%s take a %s; name one"):format(table.concat(candidates, ", "), resolved.type), "concept_field"
+    else
+      field = candidates[1]
+    end
+
+    local values = given_list(field, fields[field]) or {}
+    table.insert(values, prefix)
+    fields[field] = cfg.frontmatter[field].list == false and { prefix } or values
+  end
+
+  local _, unsupported, code = M.filename(cfg, "", { concept = prefix })
   if unsupported then
-    return nil, unsupported, "prefix"
+    return nil, unsupported, code
   end
 
   local title = opts.title and vim.trim(opts.title) or ""
@@ -215,26 +295,24 @@ function M.create_engram(brain_name, opts)
     return nil, "a title is required"
   end
 
-  local slug = M.slugify(title, cfg.engrams.filename.separator)
-  if slug == "" then
+  local name = slug.slugify(title)
+  if name == "" then
     return nil, "the title needs a letter or digit", "empty_slug"
   end
 
-  local filename = M.filename(cfg, slug) --[[@as string]]
+  local vars = { title = title, date = date.format(cfg.engrams.date_format) }
+  local header, header_err = M.header(cfg, fields, { vars = vars, registry = registry })
+  if not header then
+    return nil, header_err
+  end
+
+  local filename = M.filename(cfg, name, { concept = prefix }) --[[@as string]]
   local path = target.location .. "/" .. filename
   if vim.uv.fs_stat(path) then
     return nil, ("engram %s already exists"):format(filename), "collision"
   end
 
-  local header, header_err = M.header(cfg, opts.fields)
-  if not header then
-    return nil, header_err
-  end
-
-  local prose, cursor = M.render_template(cfg.engrams.content_template, {
-    title = title,
-    date = date.format(cfg.engrams.date_format),
-  })
+  local prose, cursor = M.render_template(cfg.engrams.content_template, vars)
   if opts.body then
     prose, cursor = M.insert_body(prose, cursor, opts.body)
   end

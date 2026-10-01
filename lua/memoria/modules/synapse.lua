@@ -33,8 +33,7 @@ local synapse = require("memoria.lib.synapse")
 ---@return string? inverse
 local function inverse_of(fields, name)
   local inverse = fields[name].inverse
-  local field = inverse and fields[inverse]
-  return field and field.target == "engram" and inverse or nil
+  return inverse and fields[inverse] and inverse or nil
 end
 
 --- The engram a synapse value points at, as a filename.
@@ -73,7 +72,7 @@ end
 function M.connect(target_brain, source, target, field)
   local fields = config.load_brain_config(target_brain.location).synapses
 
-  if not fields[field] or fields[field].target ~= "engram" then
+  if not fields[field] then
     return nil, ("no engram field '%s'"):format(field)
   end
   if source == target then

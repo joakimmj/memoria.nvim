@@ -5,10 +5,13 @@ local M = {}
 
 local brain = require("memoria.modules.brain")
 local config = require("memoria.config")
+local frontmatter_lib = require("memoria.lib.frontmatter")
 local synapse_lib = require("memoria.lib.synapse")
 local ui_atlas = require("memoria.ui.atlas")
 local ui_brain = require("memoria.ui.brain")
+local ui_concept = require("memoria.ui.concept")
 local ui_engram = require("memoria.ui.engram")
+local ui_frontmatter = require("memoria.ui.frontmatter")
 local ui_synapse = require("memoria.ui.synapse")
 
 --- Complete brain names.
@@ -20,19 +23,33 @@ local function complete_brains(lead)
   end, brain.names())
 end
 
---- Complete engram field names of the current buffer's brain.
----@param lead string Typed so far
----@return string[]
-local function complete_engram_fields(lead)
-  local current = brain.current()
-  if not current then
-    return {}
-  end
+--- A completion over the current buffer's brain's fields, as `names` lists
+--- them from its config.
+---@param names fun(cfg: memoria.Config): string[]
+---@return fun(lead: string): string[]
+local function complete_fields(names)
+  return function(lead)
+    local current = brain.current()
+    if not current then
+      return {}
+    end
 
-  local fields = config.load_brain_config(current.location).synapses
-  return vim.tbl_filter(function(name)
-    return vim.startswith(name, lead)
-  end, synapse_lib.field_names(fields, "engram"))
+    return vim.tbl_filter(function(name)
+      return vim.startswith(name, lead)
+    end, names(config.load_brain_config(current.location)))
+  end
+end
+
+--- Synapse fields, or frontmatter fields of one kind.
+---@param kind? "concept"|"value" Nil: synapse fields
+---@return fun(cfg: memoria.Config): string[]
+local function fields_of(kind)
+  return function(cfg)
+    if not kind then
+      return synapse_lib.field_names(cfg.synapses)
+    end
+    return frontmatter_lib.field_names(cfg.frontmatter, kind)
+  end
 end
 
 --- Create every command. Safe to call again.
@@ -63,7 +80,29 @@ function M.create()
 
   create("MiaSynapseAttach", function(cmd)
     ui_synapse.attach_synapse({ field = cmd.fargs[1] })
-  end, { nargs = "?", complete = complete_engram_fields, desc = "Link the current engram to another" })
+  end, { nargs = "?", complete = complete_fields(fields_of()), desc = "Link the current engram to another" })
+
+  -- Everything after the field is the value, spaces and all.
+  create("MiaFrontmatterEdit", function(cmd)
+    local value = #cmd.fargs > 1 and table.concat(vim.list_slice(cmd.fargs, 2), " ") or nil
+    ui_frontmatter.edit_frontmatter_field({ field = cmd.fargs[1], value = value })
+  end, { nargs = "*", complete = complete_fields(fields_of("value")), desc = "Set a frontmatter value" })
+
+  create("MiaConceptAttach", function(cmd)
+    ui_concept.attach_concept({ field = cmd.fargs[1] })
+  end, { nargs = "?", complete = complete_fields(fields_of("concept")), desc = "Put a concept on the current engram" })
+
+  create("MiaConceptEdit", function(cmd)
+    ui_concept.set_concept_meta(cmd.fargs[1])
+  end, { nargs = "?", complete = complete_brains, desc = "Fill in a concept's meta" })
+
+  create("MiaConceptList", function(cmd)
+    ui_concept.print_list(cmd.fargs[1])
+  end, { nargs = "?", complete = complete_brains, desc = "List a brain's concepts" })
+
+  create("MiaConceptRegister", function(cmd)
+    ui_concept.register_undeclared_concepts(cmd.fargs[1])
+  end, { nargs = "?", complete = complete_brains, desc = "Register the concepts nothing answers to" })
 
   create("MiaAtlasRebuild", function(cmd)
     ui_atlas.rebuild_atlas(cmd.fargs[1], { fix = cmd.bang })
