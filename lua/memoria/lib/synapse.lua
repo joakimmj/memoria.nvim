@@ -7,24 +7,18 @@ local md_drafting = require("memoria.lib.md-drafting")
 ---@field title string Link text
 ---@field path string Link target
 
---- Configured field names with the given target, sorted.
+--- Configured field names, sorted.
 ---@param fields table<string, memoria.SynapseField> Synapse config
----@param target "engram"|"concept"
 ---@return string[] names
-function M.field_names(fields, target)
-  local names = {}
-  for name, field in pairs(fields) do
-    if field.target == target then
-      table.insert(names, name)
-    end
-  end
+function M.field_names(fields)
+  local names = vim.tbl_keys(fields)
   -- Lua tables have no key order; sorting keeps output stable.
   table.sort(names)
   return names
 end
 
 --- The link a synapse value is written as: the filename's stem as its text.
----@param filename string Engram filename, e.g. "20260801_project-x.md"
+---@param filename string Engram filename, e.g. "2026-08-01_project_x.md"
 ---@return memoria.SynapseLink
 function M.link(filename)
   return { title = (filename:gsub("%.md$", "")), path = filename }
@@ -67,15 +61,14 @@ end
 ---@return string? err Why the frontmatter could not be read
 function M.write_synapse_block(lines, engram, fields)
   local names = {}
-  for _, name in ipairs(M.field_names(fields, "engram")) do
+  for _, name in ipairs(M.field_names(fields)) do
     local values = engram.synapses[name] or {}
     if #values > 0 or fields[name].show_empty ~= false then
       names[name] = true
     end
   end
   for name in pairs(engram.synapses) do
-    local field = fields[name]
-    if not field or field.target ~= "engram" then
+    if not fields[name] then
       names[name] = true
     end
   end
