@@ -7,7 +7,9 @@ local md_drafting = require("memoria.lib.md-drafting")
 -- binds to. The headless functions behind them are under M.core.
 M.atlas = require("memoria.ui.atlas")
 M.brain = require("memoria.ui.brain")
+M.concept = require("memoria.ui.concept")
 M.engram = require("memoria.ui.engram")
+M.frontmatter = require("memoria.ui.frontmatter")
 M.synapse = require("memoria.ui.synapse")
 
 --- Every feature without its prompts, pickers and buffers: given all its
@@ -15,7 +17,9 @@ M.synapse = require("memoria.ui.synapse")
 M.core = {
   atlas = require("memoria.modules.atlas"),
   brain = require("memoria.modules.brain"),
+  concept = require("memoria.modules.concept"),
   engram = require("memoria.modules.engram"),
+  frontmatter = require("memoria.modules.frontmatter"),
   synapse = require("memoria.modules.synapse"),
 }
 
@@ -25,7 +29,7 @@ M.core = {
 ---@return string? err Why memoria did not set up
 function M.setup(opts)
   if not md_drafting.available() then
-    local err = "memoria.nvim requires md-drafting.nvim (with its api table) — add it as a dependency and restart"
+    local err = "memoria.nvim requires md-drafting.nvim v0.3.0 or later — add it as a dependency and restart"
     vim.notify(err, vim.log.levels.ERROR)
     return nil, err
   end

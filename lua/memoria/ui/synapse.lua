@@ -64,23 +64,13 @@ function M.attach_synapse(opts)
     end)
   end
 
-  local fields = synapse_lib.field_names(cfg.synapses, "engram")
-  if opts.field then
-    if not vim.tbl_contains(fields, opts.field) then
-      return message.error(message.in_brain(target_brain.name, ("no engram field '%s'"):format(opts.field)))
-    end
-    pick_target(opts.field)
-  elseif #fields == 0 then
-    message.warn(message.in_brain(target_brain.name, "no engram fields configured"))
-  elseif #fields == 1 then
-    pick_target(fields[1])
-  else
-    vim.ui.select(fields, { prompt = message.in_brain(target_brain.name, "Synapse field:") }, function(choice)
-      if choice then
-        pick_target(choice)
-      end
-    end)
-  end
+  message.pick_field(
+    target_brain.name,
+    synapse_lib.field_names(cfg.synapses),
+    opts.field,
+    { kind = "engram", prompt = "Synapse field:" },
+    pick_target
+  )
 end
 
 return M

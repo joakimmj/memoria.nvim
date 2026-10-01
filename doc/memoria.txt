@@ -12,10 +12,11 @@ CONTENTS                                                *memoria-contents*
     4. Brains ................................. |memoria-brains|
     5. Engrams ................................ |memoria-engrams|
     6. Synapses ............................... |memoria-synapses|
-    7. Atlas .................................. |memoria-atlas|
-    8. Commands ............................... |memoria-commands|
-    9. CLI .................................... |memoria-cli|
-   10. API .................................... |memoria-api|
+    7. Concepts ............................... |memoria-concepts|
+    8. Atlas .................................. |memoria-atlas|
+    9. Commands ............................... |memoria-commands|
+   10. CLI .................................... |memoria-cli|
+   11. API .................................... |memoria-api|
 
 ==============================================================================
 1. INTRODUCTION                                     *memoria-introduction*
@@ -28,17 +29,24 @@ Commands and functions are named by what they do to their noun, one meaning
 per verb:
 
     Register    record something that exists outside memoria: a brain
-                folder. Its inverse is Deregister.
-    Create      make something new: an engram
-    Attach      put a relation on the current engram: a synapse
+                folder, a concept an engram names that the registry does
+                not know. Its inverse is Deregister.
+    Create      make something new: an engram, a concept nothing names yet
+    Attach      put a relation on the current engram: a synapse, a concept
+    Edit        change what an existing thing carries: a concept's meta, an
+                engram's frontmatter value
 
 Nothing is mapped by default.
 
 ==============================================================================
 2. REQUIREMENTS                                     *memoria-requirements*
 
-Neovim 0.10 or later, and md-drafting.nvim with its `api` table.
-`setup()` checks for it and stops with an error when it is missing.
+- Neovim 0.10 or later
+- md-drafting.nvim v0.3.0 or later
+- nvim-treesitter with the `markdown` and `markdown_inline` parsers
+
+`setup()` stops with an error when md-drafting.nvim is missing; it cannot
+tell an older version apart, so keep it up to date.
 
 ==============================================================================
 3. CONFIGURATION                                          *memoria-config*
@@ -50,8 +58,8 @@ brain's own `.mia_dna.json`. Maps merge by key; lists replace wholesale.
 A missing key follows the tier above. `null` in JSON, or `vim.NIL` in
 `setup()`, removes it instead:
 
-- an entry in `synapses` stays removed, e.g. `{ "synapses": { "up": null } }`
-  gives the brain no `up` field;
+- an entry in `synapses`, `frontmatter` or `concepts` stays removed, e.g.
+  `{ "synapses": { "up": null } }` gives the brain no `up` field;
 - any other setting goes back to its built-in default, skipping the value
   from `setup()`.
 Every value below is the default: >lua
@@ -61,12 +69,17 @@ Every value below is the default: >lua
       add_commands = true,
 
       engrams = {
-        -- Tokens: YYYY, YY, MM, DD, HH, mm, ss.
-        date_format = "YYYYMMDD",
+        -- Tokens: YYYY, YY, MM, DD, HH, mm, ss. For %date%, in the
+        -- template and in a frontmatter field's default.
+        date_format = "YYYY-MM-DD",
+        -- How a concept field writes a concept: "slug" (its key) or
+        -- "display_name". A field's own concept_form wins.
+        concept_form = "slug",
         filename = {
-          -- "date" or "none".
+          -- "date", "concept" or "none".
           prefix = "date",
-          separator = "_",
+          -- Tokens as above, for the "date" prefix.
+          date_format = "YYYY-MM-DD",
         },
         -- Prose under the generated header. %cursor% marks where typing
         -- starts; %title% and %date% are expanded.
@@ -79,15 +92,33 @@ Every value below is the default: >lua
         },
       },
 
-      -- Engram fields go in the SYNAPSES block, concept fields in
-      -- frontmatter. Both are written sorted by name.
+      -- Engram-to-engram fields, in the SYNAPSES block, sorted by name.
+      -- show_empty writes the field even with no values. inverse: the
+      -- field kept in sync on the other engram. list defaults to true;
+      -- list = false: one value, replaced on add.
       synapses = {
-        -- target: "engram" or "concept". show_empty writes the field
-        -- even with no values. inverse: the engram field kept in sync on
-        -- the other side. list = false: one value, replaced on add.
-        up = { target = "engram", inverse = "down", list = true, show_empty = true },
-        down = { target = "engram", inverse = "up", list = true, show_empty = true },
-        tags = { target = "concept" },
+        up = { inverse = "down", list = true, show_empty = true },
+        down = { inverse = "up", list = true, show_empty = true },
+      },
+
+      -- Frontmatter fields, sorted by name. kind: "concept" (resolved
+      -- against the registry) or "value" (plain text). list defaults to
+      -- true; list = false: one value, written as itself rather than as a
+      -- list of one.
+      -- concept_type: the one type a concept field takes; left out, it
+      -- takes every type. concept_form: as engrams.concept_form, for this
+      -- field. default: what a new engram's value field holds, with
+      -- %title% and %date% expanded.
+      frontmatter = {
+        created = { kind = "value", list = false, default = "%date%" },
+        tags = { kind = "concept", concept_type = "tag", list = true },
+      },
+
+      -- The concept types this brain has, and what each is asked for when
+      -- its meta is filled in, see |memoria-concepts|. A concept's type is
+      -- one of these, or one the registry already uses.
+      concepts = {
+        tag = { fields = { "description" } },
       },
     })
 <
@@ -126,6 +157,9 @@ A brain that *is* named must exist: an unknown name is an error, never the
 picker. Steps 3 and 4 are why the CLI (|memoria-cli|) needs `--brain` only
 when more than one brain is registered.
 
+The concept commands take the brain too, and ask for the concept inside it: a
+concept name means nothing until its brain is known.
+
 ==============================================================================
 5. ENGRAMS                                               *memoria-engrams*
 
@@ -133,17 +167,32 @@ when more than one brain is registered.
 %title%; the filename uses its slug: >
 
     Note about Java
-    20260801_note_about_java.md      prefix = "date"
+    2026-08-01_note_about_java.md    prefix = "date"
+    java_note_about_java.md          prefix = "concept", java picked
     note_about_java.md               prefix = "none"
 <
-The slug is lowercased, whitespace becomes `filename.separator`, and
-characters no filesystem allows (/ \ : * ? " < > |) are dropped. When the file
-already exists, or nothing usable is left, |:MiaEngramCreate| asks again with
-the title filled in and the reason in the prompt.
+                                                              *memoria-slug*
+A slug is strict snake_case, and the same function makes concept keys
+(|memoria-mia_concepts.json|): Latin letters are transliterated (`Ærlig
+Østers` is `aerlig_osters`), everything outside a-z and 0-9 becomes one `_`,
+and none is left at either end. `Mary-Jane`, `proj/web` and `Node.js` become
+`mary_jane`, `proj_web` and `node_js`; a title in a script with no Latin
+letters leaves nothing. When the file already exists, or nothing usable is
+left, |:MiaEngramCreate| asks again with the title filled in and the reason in
+the prompt.
+
+With `prefix = "concept"`, |:MiaEngramCreate| picks the concept before it asks
+for the title (|memoria-concepts-pick|), and the filename starts with its key.
+The concept is also written into a field taking it, so a prefix is never only
+cosmetic: a `java_` file nothing tags `java` would be visible in a listing and
+invisible to everything that searches. Every concept field taking its type is
+a candidate, typed or catch-all (|memoria-concepts-types|); with more than one
+the field is picked too, and with none the engram is refused.
 
 The file gets a generated header, then the content template: >markdown
 
     ---
+    created: 2026-08-01
     tags: []
     ---
     <!-- SYNAPSES -->
@@ -154,12 +203,21 @@ The file gets a generated header, then the content template: >markdown
 
     # Note about Java
 <
-The frontmatter is left out when no `synapses` field has target "concept",
-and the SYNAPSES block when none would show a line. A brain with every field
-removed (|memoria-config-null|) gets plain markdown. A blank line separates
-the header from the template, and is left out with the header.
+The frontmatter is left out when there are no `frontmatter` fields, and the
+SYNAPSES block when no synapse field would show a line. A brain with every
+field removed (|memoria-config-null|) gets plain markdown. A blank line
+separates the header from the template, and is left out with the header.
 
 The buffer opens with the cursor at %cursor%.
+
+                                                        *memoria-frontmatter*
+A value field holds plain text. A new engram's is its `default`, expanded,
+or empty; `created` is one like any other, `default = "%date%"`, so nothing
+writes it again after creation and there is no `updated` beside it — the
+file's own time already says when it was touched. |:MiaFrontmatterEdit| sets
+one on the current engram: a single value is replaced, a list gets the value
+added once, and an empty value clears either. A concept field is refused
+there: |:MiaConceptAttach| is what resolves and checks a concept.
 
 ==============================================================================
 6. SYNAPSES                                             *memoria-synapses*
@@ -169,7 +227,7 @@ field, and writes the field's `inverse` on the other one: >markdown
 
     <!-- SYNAPSES -->
     - **down:**
-    - **up:** [20260801_project-x](20260801_project-x.md)
+    - **up:** [2026-08-01_project_x](2026-08-01_project_x.md)
     ***
     <!-- /SYNAPSES -->
 <
@@ -183,28 +241,163 @@ Frontmatter that cannot be read stops the write, and neither file changes.
 An engram open in a buffer is written through the buffer and saved.
 
 ==============================================================================
-7. ATLAS                                                   *memoria-atlas*
+7. CONCEPTS                                             *memoria-concepts*
+
+A concept is something an engram names without being a file of its own: a
+person, a tag, a topic. Concept fields (`tags`, and any other `frontmatter`
+field of kind "concept") hold concepts in frontmatter; the brain's registry
+says what each is.
+
+                                                   *memoria-mia_concepts.json*
+The registry is `.mia_concepts.json` in the brain folder: hidden like the
+other `.mia_*` files, plain JSON meant to be read and edited by hand, one key
+per line, keyed by slug
+(|memoria-slug|): >json
+
+    {
+      "alice_smith": {
+        "aliases": [
+          "AS"
+        ],
+        "display_name": "Alice Smith",
+        "meta": {
+          "email": "alice@example.com"
+        },
+        "type": "person"
+      }
+    }
+<
+The key is the display name's slug unless one is given instead — for a name
+the slug loses too much of (`C++` is `c`; give it `cpp`), or two people
+sharing a name. So `Alice Smith`, `alice smith` and `Alice-Smith` are one key,
+and a near-duplicate is refused rather than becoming a second person.
+`display_name` is the natural name pickers and lists show; no two concepts
+share one. `type` is one the brain has: a type given a schema under
+`concepts` in |memoria-config|, or one its registry already uses. Nothing else
+is offered or accepted, so `room` and `rooms` cannot become two types by a
+typo. `aliases` are other names that resolve to the same concept. `note` is
+free text. `meta` is free-form, and the type's schema decides which keys are
+asked for.
+
+A mention resolves, in this order, to the concept whose key, display name or
+alias it is, else to the concept whose key its slug is — so `alice smith`
+typed by hand needs no alias, and `C++` finds `cpp` before `c`. A mention
+nothing resolves to is undeclared — a state to fix, never a reason to refuse a
+write. A tag that is never registered behaves exactly as a plain label always
+has.
+
+                                                      *memoria-concepts-types*
+A concept field that declares a `concept_type` takes that type and refuses
+the rest: `tags` takes tags, and a room belongs in a field for rooms. A field
+without one is a catch-all, taking every type: >json
+
+    { "concepts": { "room": { "fields": ["floor"] } },
+      "frontmatter": {
+        "rooms": { "kind": "concept", "concept_type": "room" },
+        "related": { "kind": "concept" }
+      } }
+<
+A field is written the shape it is declared: a list by default, and with
+`list = false` the value itself, or the bare key when it holds none. Either
+shape reads back the same: >markdown
+
+    ---
+    room: kitchen
+    tags: [java, streams]
+    ---
+<
+                                                       *memoria-concepts-form*
+Each concept field writes a concept one way: by key (`concept_form = "slug"`,
+the default, `tags: [java, alice_smith]`) or by display name
+(`"display_name"`, `participants: [Alice Smith]`). A value written the other
+way, or as an alias, still resolves; the atlas reports it and
+`:MiaAtlasRebuild!` rewrites it (|memoria-atlas|). A display name changed in
+`.mia_concepts.json` is picked up the same way.
+
+                                                     *memoria-concepts-attach*
+|:MiaConceptAttach| puts a concept in one of the current engram's concept
+fields — the concept counterpart of |:MiaSynapseAttach|. The engram decides
+the brain. The field is picked first when the brain has more than one, then
+the concept from the ones that field takes (|memoria-concepts-types|). The
+concept is written in the field's form, whatever name it was given by; one
+already there changes nothing, and a field with `list = false` gives up the
+value it held. The frontmatter line is rewritten in place, every other line
+kept as it was.
+
+                                                       *memoria-concepts-pick*
+Choosing a concept is one interaction wherever it happens — attaching one, a
+concept filename prefix, filling in meta, declaring an undeclared one: a
+picker over the brain's concepts by display name — only the field's type for
+a typed field — with `+ Create new concept` last. Creating asks for the
+display name, the slug (filled in with the derived one), the type unless the
+field settles it, and then each field the type's schema names.
+
+                                                       *memoria-concepts-meta*
+Filling in meta asks once per schema field, then once per key the concept
+already carries that the schema does not name, so nothing is dropped by going
+unasked. Each prompt is filled in with the current value: leave it to keep it,
+clear it to remove the key. Anything else — aliases, notes, the display name,
+a new key — is an edit to `.mia_concepts.json` itself.
+
+                                                 *memoria-concepts-undeclared*
+|:MiaConceptRegister| walks the undeclared concepts, most-used first. Each one
+is either created with it as the display name, or made an alias of a concept
+you pick. The engrams naming them then get the repair `:MiaAtlasRebuild!`
+makes for concepts not in their field's form (|memoria-concepts-form|):
+`tags: [Another topic]` becomes `tags: [another_topic]`, an alias becomes its
+concept.
+
+The atlas reports concepts only once the registry holds something
+(|memoria-atlas|): a brain that has declared nothing is not told that
+everything it writes is undeclared. |:MiaConceptRegister| is asked for, so it
+answers regardless.
+
+There is no command that only creates a concept: one nothing names would be
+reported as an orphan straight away. A concept is created where it is about
+to be used, from the picker's `+ Create new concept`
+(|memoria-concepts-pick|). The CLI's `create-concept` is the exception, since
+a shell has no picker.
+
+==============================================================================
+8. ATLAS                                                   *memoria-atlas*
 
 Each brain keeps a derived index in `.mia_atlas.json`: per engram its title,
 synapses, linked engrams, concept fields (e.g. `tags`) and tasks, plus
-backlinks and which engrams name each concept. It can be deleted at any time.
+backlinks, which engrams name each concept, and the registered concepts by
+type. It can be deleted at any time.
+
+A mention is indexed under the key of the concept it resolves to
+(|memoria-concepts|), so an engram writing an alias or a display name counts
+for the concept itself.
 
 The atlas brings itself up to date whenever memoria reads it: new and changed
 engrams are parsed again, deleted ones dropped. Edits made outside Neovim are
-picked up the same way.
+picked up the same way. An edit to `.mia_concepts.json` is noticed too, and
+re-derives what depends on it without parsing a single engram again.
 
 |:MiaAtlasRebuild| builds it from scratch and puts what is wrong in the
 quickfix list:
 
 - a synapse or link to an engram that does not exist;
 - a synapse whose inverse is missing on the other engram;
-- frontmatter that cannot be read.
+- frontmatter that cannot be read;
+- a concept an engram names that nothing in the registry resolves to, at the
+  concept field's line;
+- a concept in a field whose `concept_type` is another type;
+- a concept not written in its field's form (|memoria-concepts-form|);
+- a registered concept no engram names, at its key in `.mia_concepts.json`.
 
-With `!` it first writes every missing inverse, and regenerates each existing
-SYNAPSES block from config, adding lines for fields configured since.
+The concept problems appear only once the registry holds a concept.
+
+With `!` it first writes every missing inverse, rewrites every concept field
+not in its form, and regenerates each existing SYNAPSES block from config,
+adding lines for fields configured since. The other concept problems have no
+repair to write: |:MiaConceptRegister| is what fixes an undeclared one, a
+concept in the wrong field is moved by hand, and an orphan is deleted or kept
+by hand.
 
 ==============================================================================
-8. COMMANDS                                             *memoria-commands*
+9. COMMANDS                                             *memoria-commands*
 
 These global commands are created unless `add_commands = false`.
 
@@ -231,12 +424,29 @@ These global commands are created unless `add_commands = false`.
                                                            *:MiaSynapseAttach*
 :MiaSynapseAttach [field]   Link the current engram to another, picked,
                             through [field] (picked when not given)
+                                                         *:MiaFrontmatterEdit*
+:MiaFrontmatterEdit [field] [value]
+                            Set a value field on the current engram; the
+                            field is picked and the value asked for when not
+                            given (|memoria-frontmatter|)
+                                                           *:MiaConceptAttach*
+:MiaConceptAttach [field]   Put a concept in the current engram's [field]
+                            (picked when not given); picked, or created
+                                                           *:MiaConceptEdit*
+:MiaConceptEdit [brain]     Pick a concept and fill in its meta
+                                                           *:MiaConceptList*
+:MiaConceptList [brain]     List the brain's concepts by type, with how many
+                            engrams name each, ⚠ for none
+                                                       *:MiaConceptRegister*
+:MiaConceptRegister [brain] Register the undeclared concepts, most-used
+                            first: create each, or make it an alias, and
+                            rewrite it in the engrams naming it
                                                           *:MiaAtlasRebuild*
 :MiaAtlasRebuild[!] [brain] Rebuild the atlas and list problems in the
                             quickfix list; with ! repair what can be
 
 ==============================================================================
-9. CLI                                                       *memoria-cli*
+10. CLI                                                      *memoria-cli*
 
 `bin/mia` is memoria with no editor running: the same functions the commands
 call, from a shell. A script, a git hook, another editor, an AI agent — see
@@ -267,8 +477,8 @@ md-drafting.nvim has to be on `package.path` already for that to work.
                                                         *memoria-cli-output*
 One JSON object on stdout, and an exit status to match: >
 
-    { "ok": true, "result": { "path": "/home/me/notes/work/20260801_x.md" } }
-    { "ok": false, "error": "(work) engram 20260801_x.md already exists" }
+    { "ok": true, "result": { "path": "/home/me/work/2026-08-01_x.md" } }
+    { "ok": false, "error": "(work) engram 2026-08-01_x.md already exists" }
 <
 `0` for `ok`, `1` otherwise. Errors name their brain the way prompts do.
 Everything else — the config's own output, memoria's own diagnostics — goes to
@@ -282,28 +492,55 @@ no config, so it still answers when nothing else does.
                                                       *memoria-cli-commands*
 `bin/mia commands` prints the list below as JSON, with each command's
 arguments, and is the place to start; `bin/mia --help` is the same list in
-words. Brain-scoped commands take
-`--brain`, needed only when more than one brain is registered
-(|memoria-brains|).
+words. Brain-scoped commands take `--brain`, needed only when more than one
+brain is registered (|memoria-brains|).
 
     brains                  Every brain: name, location, whether it exists
     engrams [--concept C]   Every engram: filename, title, concept fields
-                            and when it changed; only those naming C when
-                            given
+                            and when it changed; only those naming C, or
+                            any of its aliases, when given
     engram {file}           One engram: its atlas entry, its backlinks and
                             its content
+    concepts [--type T] [--undeclared]
+                            Every registered concept, key and display name,
+                            with the engrams naming it; only those of type T
+                            when given. With
+                            --undeclared, the mentions nothing resolves to
+                            instead, most-used first
     tasks [--state S]       The tasks, by state: "not_done", "done", or both
     check                   Rebuild the atlas and report what is wrong, each
                             with its file, line and kind
     rebuild [--fix]         The same; with --fix, repair what can be
                             repaired first
     create-engram --title T [--field name=value,...] [--body text|-]
+               [--concept C] [--concept-field F]
                             Create an engram, opening nothing. --field once
-                            per concept field; --body - reads stdin, so
-                            multi-line prose needs no shell quoting
+                            per frontmatter field, values comma-separated
+                            (so none holds a comma), a value field's
+                            replacing its default; --body - reads stdin, so
+                            multi-line prose needs no shell quoting;
+                            --concept names the concept a brain with
+                            `prefix = "concept"` prefixes it with, and
+                            --concept-field which field it goes in when more
+                            than one takes its type
     attach-synapse {source} {field} {target}
                             Link two engrams, writing the inverse on the
                             other one
+    create-concept --name N --type T [--slug S] [--meta name=value]
+                            Create a concept displayed as N, keyed by its
+                            slug or S; --meta once per key. A key or display
+                            name already taken is an error
+    edit-concept --name N [--type T] [--meta name=value]
+                            Change a registered concept's type or meta,
+                            key by key; `--meta name=` removes a key. N is
+                            any name that resolves to it
+    attach-concept {source} {field} {concept}
+                            Put a concept in an engram's concept field, in
+                            the field's form. A name nothing declares goes in
+                            as given
+    edit-frontmatter {source} {field} {value}
+                            Set a value field on an engram: replaces a single
+                            value, adds to a list, and "" clears it
     commands                Every command and its arguments
 
 The surface is reading and adding. `rename_engram` and `delete_engram` are not
@@ -329,7 +566,7 @@ you get |W12| and decide which side wins. The atlas refreshes whenever either
 side reads it, so each picks up what the other wrote.
 
 ==============================================================================
-10. API                                                      *memoria-api*
+11. API                                                      *memoria-api*
 
     local memoria = require("memoria")
 
@@ -364,7 +601,31 @@ an error naming no brain. The CLI (|memoria-cli|) calls only the second.
 
     memoria.engram.create_engram({brain}, {opts})
         Ask for a title, create the engram and open it at its cursor, asking
-        again when the title cannot be a filename.
+        again when the title cannot be a filename. With `prefix = "concept"`
+        the concept is picked first.
+
+    memoria.concept.attach_concept({opts})
+        Put a concept on the current engram. {opts}.source (path, default:
+        the current buffer), {opts}.field and {opts}.concept are asked for
+        when left out.
+    memoria.concept.set_concept_meta({brain}, {name})
+        Fill in a concept's meta; picked when {name}, any name resolving to
+        it, is not given.
+    memoria.concept.register_undeclared_concepts({brain})
+        Walk the undeclared concepts, see |memoria-concepts-undeclared|.
+    memoria.concept.print_list({brain})
+        Echo the concepts, see |:MiaConceptList|.
+    memoria.concept.pick_or_create({brain}, {opts}, {run})
+        Pick a concept or register one, and pass it to {run}. {brain} is a
+        resolved brain; {opts} takes `prompt`, `name` (filled into the
+        create prompt) and `concept_type` (all this field takes, and the
+        type a new one is given; left out, every concept, and a new one's
+        type is asked). See |memoria-concepts-pick|.
+
+    memoria.frontmatter.edit_frontmatter_field({opts})
+        Set a value field on the current engram. {opts}.source (path,
+        default: the current buffer), {opts}.field and {opts}.value are asked
+        for when left out.
 
     memoria.synapse.attach_synapse({opts})
         Link the current engram to another. {opts}.source (path, default: the
@@ -404,15 +665,27 @@ Every function below answers a result, or nil and an error.
 
     memoria.core.engram.create_engram({brain}, {opts})
         Create an engram, opening nothing. {opts}.title is required,
-        {opts}.fields fills the frontmatter, {opts}.body lands at %cursor%.
-        Returns `{ path, cursor }`, or nil, an error, and a code:
-        "empty_slug", "collision" or "prefix" (see |memoria-engrams|).
-    memoria.core.engram.header({cfg}, {fields})
+        {opts}.fields fills the frontmatter, {opts}.body lands at %cursor%,
+        {opts}.concept is the concept a "concept" prefix uses and
+        {opts}.concept_field the field it goes in. Returns `{ path, cursor }`,
+        or nil, an error, and a code: "empty_slug", "collision", "prefix",
+        "concept" or "concept_field" (see |memoria-engrams|).
+    memoria.core.engram.header({cfg}, {fields}, {opts})
         The generated header for a config, with {fields}' values in it.
-    memoria.core.engram.filename({cfg}, {slug}, {time})
-        The filename a slug gets under the configured prefix.
-    memoria.core.engram.slugify({title}, {separator})
-        The filename-safe slug of a title.
+        {opts} takes `vars` (`{ title, date }`, for defaults) and `registry`
+        (what concepts resolve against).
+    memoria.core.engram.filename({cfg}, {slug}, {opts})
+        The filename a slug gets under the configured prefix. {opts} takes
+        `time` and `concept` (a key).
+
+    memoria.core.frontmatter.update_field({source}, {name}, {kind}, {edit})
+        Change one frontmatter field of kind {kind} ("concept" or "value"):
+        {edit} gets its values as a list and answers the new ones, or nil and
+        an error. Returns `{ brain, source, values }`.
+    memoria.core.frontmatter.edit_frontmatter_field({opts})
+        Set a value field on an engram and refresh the atlas. {opts}.source
+        (path), {opts}.field and {opts}.value are required; "" clears.
+        Returns `{ brain, source, field, value }`.
 
     memoria.core.synapse.attach_synapse({opts})
         Link two engrams and refresh the atlas. {opts}.source (path),
@@ -428,12 +701,44 @@ Every function below answers a result, or nil and an error.
         every engram again.
     memoria.core.atlas.rebuild_atlas({brain}, {opts})
         Rebuild from scratch and check it. Returns `{ atlas, problems }`;
-        {opts}.fix repairs missing inverses and backfills SYNAPSES blocks
-        first.
+        {opts}.fix repairs missing inverses, rewrites concepts into their
+        field's form and backfills SYNAPSES blocks first.
+    memoria.core.atlas.fix_forms({brain}, {filenames})
+        The rebuild's repair of concepts not in their field's form, for
+        those engrams only. Returns the filenames that changed.
     memoria.core.atlas.locate_problems({brain}, {problems})
         The same problems, each with the file and row it sits on.
-    memoria.core.atlas.check({atlas}, {cfg})
-        Everything wrong with a brain's links, each with a kind.
+    memoria.core.atlas.check({atlas}, {cfg}, {registry})
+        Everything wrong with a brain's links and concepts, each with a kind.
+        Without {registry}, or with an empty one, no concept is reported.
+
+    memoria.core.concept.list({brain})
+        Every registered concept, sorted by key.
+    memoria.core.concept.get({brain}, {key})
+        A registered concept by its key.
+    memoria.core.concept.resolve_concept({brain}, {mention})
+        The concept a mention names, see |memoria-concepts|.
+    memoria.core.concept.create_concept({brain}, {name}, {type}, {fields},
+                                        {opts})
+        Create a concept displayed as {name}, keyed by its slug or
+        {opts}.slug. A key or display name already taken is an error.
+    memoria.core.concept.set_concept_meta({brain}, {key}, {type}, {fields})
+        Write a registered concept's meta key by key, and its type when
+        given. An empty value removes its key.
+    memoria.core.concept.add_alias({brain}, {key}, {alias})
+        Have a concept answer to another name as well.
+    memoria.core.concept.attach_concept({opts})
+        Put a concept in an engram's concept field and refresh the atlas.
+        {opts}.source (path), {opts}.field and {opts}.concept are required.
+        Returns `{ brain, source, field, concept }`.
+    memoria.core.concept.find_undeclared_concepts({brain})
+        The mentions nothing resolves to, most-used first: `{ name, count,
+        engrams }` each.
+
+    memoria.core.concept.ensure_registry({brain})
+        The brain's .mia_concepts.json, written as "{}" when it has none.
+
+A concept is `{ key, display_name, type, aliases, note, meta }`.
 
 A brain is `{ name, location }`.
 

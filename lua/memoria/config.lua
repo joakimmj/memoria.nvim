@@ -5,25 +5,39 @@ local M = {}
 local json = require("memoria.lib.json")
 
 ---@class memoria.FilenameConfig
----@field prefix "date"|"none" What goes before the slug
----@field separator string Between prefix and slug
+---@field prefix "date"|"concept"|"none" What goes before the slug
+---@field date_format string Date tokens for the "date" prefix
+
+---@alias memoria.ConceptForm "slug"|"display_name"
 
 ---@class memoria.EngramsConfig
----@field date_format string Date tokens for filename and %date%
+---@field date_format string Date tokens for %date%
+---@field concept_form memoria.ConceptForm How concept fields write a concept, unless a field says
 ---@field filename memoria.FilenameConfig
 ---@field content_template string Prose written under the header
 ---@field task_markers { not_done: string[], done: string[] } Checkbox markers the atlas indexes
 
 ---@class memoria.SynapseField
----@field target "engram"|"concept" What a value points at
 ---@field inverse? string Engram field kept in sync on the target
 ---@field list? boolean Whether the field holds more than one value
 ---@field show_empty? boolean Write the field even with no values
+
+---@class memoria.FrontmatterField
+---@field kind "concept"|"value" What a value is
+---@field list? boolean Whether the field holds more than one value
+---@field concept_type? string The one concept type a concept field takes; omitted, every type
+---@field concept_form? memoria.ConceptForm How a concept field writes a concept
+---@field default? string What create_engram writes into a value field given none; placeholders expanded
+
+---@class memoria.ConceptSchema
+---@field fields string[] Meta keys a concept of this type is asked for, in order
 
 ---@class memoria.Config
 ---@field add_commands boolean Create the :Mia* commands
 ---@field engrams memoria.EngramsConfig
 ---@field synapses table<string, memoria.SynapseField>
+---@field frontmatter table<string, memoria.FrontmatterField>
+---@field concepts table<string, memoria.ConceptSchema>
 
 ---@type memoria.Config
 M.defaults = {
@@ -31,13 +45,18 @@ M.defaults = {
   add_commands = true,
 
   engrams = {
-    -- Tokens: YYYY, YY, MM, DD, HH, mm, ss. Used by the filename prefix and %date%.
-    date_format = "YYYYMMDD",
+    -- Tokens: YYYY, YY, MM, DD, HH, mm, ss. Used by %date%, in the template and
+    -- in a field's default.
+    date_format = "YYYY-MM-DD",
+
+    -- How a concept field writes a concept: "slug" (its key) or "display_name".
+    concept_form = "slug",
 
     filename = {
-      -- "date" or "none".
+      -- "date", "concept" or "none".
       prefix = "date",
-      separator = "_",
+      -- Tokens as above, for the "date" prefix.
+      date_format = "YYYY-MM-DD",
     },
 
     -- Prose under the generated header. %cursor% marks where typing starts.
@@ -50,11 +69,23 @@ M.defaults = {
     },
   },
 
-  -- Engram fields go in the SYNAPSES block, concept fields in frontmatter.
+  -- Engram-to-engram fields, in the SYNAPSES block.
   synapses = {
-    up = { target = "engram", inverse = "down", list = true, show_empty = true },
-    down = { target = "engram", inverse = "up", list = true, show_empty = true },
-    tags = { target = "concept" },
+    up = { inverse = "down", list = true, show_empty = true },
+    down = { inverse = "up", list = true, show_empty = true },
+  },
+
+  -- Frontmatter fields: concepts, or plain values.
+  frontmatter = {
+    created = { kind = "value", list = false, default = "%date%" },
+    tags = { kind = "concept", concept_type = "tag", list = true },
+  },
+
+  -- The concept types this brain has, and what each is asked for when its meta
+  -- is filled in. A concept's type is one of these, or one the registry already
+  -- uses.
+  concepts = {
+    tag = { fields = { "description" } },
   },
 }
 
@@ -69,7 +100,7 @@ M.configured = false
 
 -- Maps whose entries are optional: a key removed from one stays removed. Every
 -- other setting is required, so removing it falls back to the built-in default.
-local OPTIONAL_ENTRIES = { synapses = true }
+local OPTIONAL_ENTRIES = { concepts = true, frontmatter = true, synapses = true }
 
 --- Merge `opts` over `defaults`: maps by key, lists replaced wholesale, and
 --- `vim.NIL` (JSON null) removing the key.
