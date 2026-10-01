@@ -24,19 +24,20 @@ and why that's the right cut.
   config key ships with the delivery that reads it, not ahead of it.
   `ARCHITECTURE.md` is the target state and describes the whole surface.
 - Commands, functions and CLI commands follow Part 3 §1's verb table —
-  Register, Create, Attach, Edit — so a new feature picks its verb there
-  rather than copying the nearest precedent.
+  Register, Create, Attach, Mention, Edit, Rename — so a new feature picks its
+  verb there rather than copying the nearest precedent. Navigation commands
+  are the one exemption.
 - Every prompt that acts on a brain names it, `(work) Engram title:` — new
   features in later deliveries included (`attach_synapse`, the concept pickers,
-  `:MiaFrontmatterEdit`, `:MiaConceptMention`, `append_to_engram`, the agenda). The brain picker in `resolve` is the one
-  exception: it is what decides the brain (§2.2).
+  `:MiaFrontmatterEdit`, `:MiaConceptMention`, the agenda). The brain picker
+  in `resolve` is the one exception: it is what decides the brain (§2.2).
 - Every feature function follows the headless core (Part 3's design principles):
   it prompts for nothing, opens nothing, and answers one `result` or
   `nil, err`. Prompts, pickers, notifications and quickfix belong to `ui/`
   (Part 3 §1.3), which the commands call and a keymap can too.
 - From Delivery 3 on, a feature the CLI can carry ships its command (§11.3) in
-  the same delivery — `append` with `append_to_engram`, `concepts` with the
-  registry. `rename_engram`/`delete_engram` never get one.
+  the same delivery — `concepts` with the registry, `search` with
+  `search_engrams`. `rename_engram`/`delete_engram` never get one.
 - Every delivery passes `nvim -l tests/run.lua [md-drafting dir]`,
   `stylua --check lua tests` and `lua-language-server --check .` with no
   warnings. Neither the tests nor `.luarc.json` may assume where
@@ -217,7 +218,9 @@ One function, ships alone because it depends on nothing this plan hasn't
 already shipped and nothing later depends on it.
 
 **Ships:**
-- `generate_index` / `index.md`, all four sections (§9.3)
+- `rebuild_index` / `:MiaIndexRebuild` writing `index.md`, all six sections
+  (§9.3), and `engrams.index`, the config it reads
+- The CLI's `rebuild-index` (§11.3), for a git hook or a cron job
 
 **What this unlocks:** a standing, regeneratable overview of the brain —
 stats, recent activity, concepts by type, open tasks — without needing
@@ -228,11 +231,11 @@ navigation history or any of the deliveries after it.
 ## Delivery 6 — Navigation history
 
 The foundational piece of "moving around a brain" — a delivery of its own now,
-rather than bundled with diary, since Agenda (Delivery 7) needs it too and
-shouldn't have to wait on diary to get it.
+rather than bundled with today's engram, since Agenda (Delivery 7) needs it
+too and shouldn't have to wait on it.
 
 **Ships:**
-- `push_nav_history` / `go_back` (§9.1)
+- `push_nav_history` / `go_back` and `:MiaBack` (§9.1), in the view
 
 **What this unlocks:** a "back" command that means something, wherever a link
 was followed from.
@@ -251,16 +254,22 @@ follow.
 
 ---
 
-## Delivery 8 — Diary
+## Delivery 8 — Today and last
 
 **Ships:**
-- `open_or_create_today` / `open_last_edited` (§9.5) — both call
+- `today_engram` / `last_engram`, headless, and `open_today` / `open_last`
+  behind `:MiaEngramToday` / `:MiaEngramLast` (§9.5). Both views call
   `push_nav_history` before opening anything, so they wait for Delivery 6
   rather than shipping alongside Delivery 1's `create_engram`, which they
   otherwise only depend on
+- `create_engram`'s `opts.filename`, how today's engram is the date alone
+- Today's engram only in a brain with `filename.prefix = "date"`; the command
+  offers only those brains when none is named
+- The CLI's `today` (§11.3), so a script can find or create today's engram
+  with its header
 
-**What this unlocks:** the diary workflow — open today's entry, creating it
-on first touch, or jump to whatever was last worked on.
+**What this unlocks:** a page for the day — open today's engram, creating it on
+first touch, or jump to whatever was last worked on.
 
 ---
 
@@ -268,9 +277,10 @@ on first touch, or jump to whatever was last worked on.
 
 **Ships:**
 - `search_engrams(brain, query, opts) → result | nil, err` — headless (dev
-  notes' headless-core rule), fuzzy match over an engram's title, filename,
-  tags and participants, read from the atlas. No prose/body search — nothing
-  in the atlas holds engram bodies, and that's a different kind of feature
+  notes' headless-core rule), fuzzy match over an engram's title, filename
+  and concept fields — a concept by its written form and its display name —
+  read from the atlas. No prose/body search — nothing in the atlas holds
+  engram bodies, and that's a different kind of feature
 - `:MiaEngramSearch [brain] [query]` — resolves the brain through §2.2's
   `resolve()`, the same as every other brain-scoped command; prompts for
   `query` when not given, opens the chosen result
@@ -317,7 +327,11 @@ can be worked around by hand in the meantime — useful, but not something
 anything else is waiting on.
 
 **Ships:**
-- `rename_engram` (§10.1) and `delete_engram` (§10.2)
+- `rename_engram` / `:MiaEngramRename` (§10.1) and `delete_engram` /
+  `:MiaEngramDelete` (§10.2), headless — a code for
+  each failure a person decides on (`collision`, `referenced`) — with the
+  title prompt and the delete confirmation in the view. No CLI command for
+  either (§11.3)
 
 **What this unlocks:** engram identity stops being one-way. Up to this point
 a filename mistake or an unwanted note was permanent (by hand-editing) or
@@ -340,6 +354,13 @@ Not scheduled into a delivery yet.
   exposed under `api` (it is internal today, Part 1 §1.1, and would need a
   Part 2 entry), and a label option, since `[Insert this folder]` is worded
   for links.
+- **Quick capture into a section.** Appending a line to a named fenced
+  section of an existing engram (`<!-- TASKS -->`) from a template
+  (`- [ ] %input%`, `- %date% — %input%`), without opening it, with a CLI
+  `append`. Unscheduled because `echo … >> file.md` covers most of it; what
+  it adds is placement inside a section rather than at the end of the file,
+  and a write through a loaded buffer. The section seam is all it needs:
+  `get`, insert, `set`.
 - **MCP server.** A stdio JSON-RPC loop in `nvim --headless -l`, loading the
   config the way `bin/mia` does (§11.1), with its tools generated from
   `cli.lua`'s command table — one schema behind both, so they cannot drift.

@@ -59,18 +59,17 @@
   - [7. Atlas (index)](#7-atlas-index)
     - [7.1 Storage — `.mia_atlas.json` (hidden)](#71-storage-mia_atlasjson-hidden)
     - [7.2 Rebuild / consistency check](#72-rebuild-consistency-check)
-  - [8. Creating and appending to engrams](#8-creating-and-appending-to-engrams)
+  - [8. Creating engrams](#8-creating-engrams)
     - [8.1 `create_engram(brain_name, opts?)`](#81-create_engrambrain_name-opts)
-    - [8.2 `append_to_engram(brain_name, engram_file, template_name, input?)`](#82-append_to_engrambrain_name-engram_file-template_name-input)
   - [9. Navigation & index](#9-navigation-index)
     - [9.1 Navigation history](#91-navigation-history)
     - [9.2 Link-or-create at cursor, and concept mentions](#92-link-or-create-at-cursor-and-concept-mentions)
     - [9.3 Generated index](#93-generated-index)
     - [9.4 Agenda](#94-agenda)
-    - [9.5 Diary / quick-open](#95-diary-quick-open)
+    - [9.5 Today and last](#95-today-and-last)
     - [9.6 Engram search](#96-engram-search)
   - [10. Renaming and deleting engrams](#10-renaming-and-deleting-engrams)
-    - [10.1 `rename_engram(brain_name, engram_path, new_title?)`](#101-rename_engrambrain_name-engram_path-new_title)
+    - [10.1 `rename_engram(brain_name, engram_path, new_title)`](#101-rename_engrambrain_name-engram_path-new_title)
     - [10.2 `delete_engram(brain_name, engram_path, opts?)`](#102-delete_engrambrain_name-engram_path-opts)
   - [11. The CLI](#11-the-cli)
     - [11.1 Invocation and config](#111-invocation-and-config)
@@ -1215,17 +1214,17 @@ grounds that the block is part of how a markdown document is written in
 practice, and two hand-rolled scanners for it would be one too many.
 
 **There is no `format_checkbox`.** Nothing writes a bare checkbox: `task.toggle`
-composes a whole line, which is `format_list_item`'s job, and memoria's append
-templates carry the literal marker in the template string (Part 3 §8.2). A
-function taking a marker and returning it would be an identity with a name. The
+composes a whole line, which is `format_list_item`'s job, and memoria's
+generated index writes the literal marker (Part 3 §9.3). A function taking a
+marker and returning it would be an identity with a name. The
 same rule keeps `format_heading` and a thematic-break formatter out — the
 constructs are here in the direction they are actually used.
 
 ## 2. Fenced sections
 
 The "regenerate fully between fixed markers" mechanism behind the TOC, shared
-with the synapse block (Part 3 §5.1), `append_to_engram` (Part 3 §8.2) and the
-generated index (Part 3 §9.3), which want exactly the same thing.
+with the synapse block (Part 3 §5.1) and the generated index (Part 3 §9.3),
+which want exactly the same thing.
 
 ```lua
 drafting.api.section.get(lines, name)              --> string[] | nil
@@ -1418,15 +1417,22 @@ one meaning per verb, each with its inverse:
 | **Attach** | put a relation on the current engram | synapse, concept | Detach |
 | **Mention** | write a concept's `#slug` into the prose at the cursor | concept | — |
 | **Edit** | change what an existing thing carries | a concept's `meta`, an engram's frontmatter value | — |
+| **Rename** | give an existing thing a new name, keeping what refers to it | engram (its filename, §10.1) | itself |
 
-The rest keep one meaning each already: List, Switch, Config, Rebuild,
-Search. A new feature picks its verb from this table; one that fits none adds a
+The rest keep one meaning each already: List, Switch, Config, Rebuild (a
+derived file regenerated from the engrams: the atlas, the index), Search. A new feature picks its verb from this table; one that fits none adds a
 row here first. A concept is made two ways, and the verb follows what was
 there before: Create when nothing was — the picker's `+ Create new concept`,
 reached while attaching, prefixing or mentioning one — and Register when an
 engram already names it and only the registry does not know it
 (`:MiaConceptRegister`, §6.4). Either way the result is a "registered" concept,
 an entry in `mia_concepts.json`.
+
+**Navigation is exempt.** A command whose purpose is bringing something into a
+window is named for where it goes: `:MiaAgenda` (§9.4), `:MiaEngramToday` and
+`:MiaEngramLast` (§9.5), `:MiaBack` (§9.1). `:MiaEngramToday` creates today's
+entry on first use, but through `create_engram`, and what it is for is the
+entry; anything whose purpose is writing takes a verb from the table.
 
 ### 1.1 Dependency: `md-drafting.nvim`
 
@@ -1466,8 +1472,8 @@ Where each is used:
 | `parse_frontmatter` | every frontmatter field (§5.2, §7.2); where the synapse block goes (§5.4) |
 | `format_frontmatter_value` / `set_frontmatter_field` | the generated header (§8.1), `attach_concept` (§6.4), `edit_frontmatter_field` (§5.7), the `non_canonical_mention` repair (§7.2) |
 | `parse_heading` | an engram's `title` for the atlas (§7.1) |
-| `section.get` | `parse_synapse_block` (§5.5), the atlas (§7.2), `append_to_engram` (§8.2) |
-| `section.set` | `write_synapse_block` (§5.4), the atlas (§7.2), `append_to_engram` (§8.2), the generated index (§9.3) |
+| `section.get` | `parse_synapse_block` (§5.5), the atlas (§7.2) |
+| `section.set` | `write_synapse_block` (§5.4), the atlas (§7.2), the generated index (§9.3) |
 | `register_link_provider` | the Engram link provider (§9.2) |
 
 `md-drafting.nvim` holds **every markdown construct it knows** in one module, not
@@ -1476,10 +1482,10 @@ parsed by the same code that writes it there. Frontmatter included: memoria does
 not carry its own YAML-ish scanner. `section` is the shared "read/replace
 within fixed markers" mechanism, the same one that generates `md-drafting`'s
 table of contents. It is two pure functions over lines, `get` and `set`, which
-is what lets `append_to_engram` rewrite a file without opening it in a buffer.
-Appending is not on the seam — it is `get`, insert, `set` (Part 2 §2), and
-memoria writes that composition where it needs it rather than expecting a
-function for it.
+is what lets memoria rewrite a file without opening it in a buffer. Any other
+edit is not on the seam — it is `get`, change, `set` (Part 2 §2), and memoria
+writes that composition where it needs it rather than expecting a function
+for it.
 
 Two small pieces of machinery the seam deliberately does not provide, so memoria
 owns them:
@@ -1499,9 +1505,9 @@ owns them:
   frontmatter field it reads goes through one helper turning `nil`/`""` into
   `{}` and a scalar into a one-item list.
 
-There is no `format_checkbox`: the task lines memoria writes come from
-`append_templates` strings that already carry the marker (§8.2), and the agenda's
-toggle (§9.4) swaps the marker through `parse_list_item`/`format_list_item`.
+There is no `format_checkbox`: the generated index writes its task lines with
+the marker as a literal (§9.3), and the agenda's toggle (§9.4) swaps the marker
+through `parse_list_item`/`format_list_item`.
 
 **Every call goes through `lib/md-drafting.lua`.** No other memoria file requires
 `md-drafting`: `lib/md-drafting.lua` wraps each `api` function memoria uses, under
@@ -1645,7 +1651,7 @@ a thin wrapper over a Lua function, so nothing here needs the command to exist.
 | `:MiaBrainSwitch [name]` | Sets the active brain for the session. Picks the brain when not named. |
 | `:MiaBrainConfig [brain]` | Opens the brain's `.mia_dna.json` (§3), creating it as `{}` when it has none. Never fills it in: an override is what differs. |
 | `:MiaEngramCreate [brain]` | Creates an engram (`create_engram`, §8.1) in the given brain. |
-| `:MiaEngramSearch [brain] [query]` | Fuzzy-searches engrams by title, filename, tags and participants (`search_engrams`, §9.6); opens a picker over the results. |
+| `:MiaEngramSearch [brain] [query]` | Fuzzy-searches engrams by title, filename and concept fields (`search_engrams`, §9.6); opens a picker over the results. |
 | `:MiaSynapseAttach [field]` | Links the current engram to another (`attach_synapse`, §5.6), asking for the field when not given and for the target. |
 | `:MiaFrontmatterEdit [field] [value]` | Sets a `value` field on the current engram (`edit_frontmatter_field`, §5.7), asking for the field, then the value, when not given. The engram decides the brain. |
 | `:MiaConceptAttach [field]` | Puts a concept in the current engram's concept field (§6.4): the field picked when not given, then the concept — only its `concept_type`, or every concept for a field without one. The engram decides the brain, as for `:MiaSynapseAttach`. |
@@ -1654,6 +1660,13 @@ a thin wrapper over a Lua function, so nothing here needs the command to exist.
 | `:MiaConceptList [brain]` | Lists the brain's concepts by type, with how many engrams name each and ⚠ for none. |
 | `:MiaConceptRegister [brain]` | Walks the undeclared concepts, most-used first (§6.4): each is created with the mention as its display name, or made an alias of an existing one, then rewritten into its field's form in the engrams naming it. |
 | `:MiaAtlasRebuild[!] [brain]` | Rebuilds the atlas and reports problems in the quickfix list (§7.2). `!` repairs what can be repaired first. |
+| `:MiaIndexRebuild [brain]` | Regenerates the brain's `index.md` (`rebuild_index`, §9.3). |
+| `:MiaEngramRename` | Renames the current engram (`rename_engram`, §10.1), asking for the new title. |
+| `:MiaEngramDelete` | Deletes the current engram (`delete_engram`, §10.2), confirming first when other engrams refer to it. |
+| `:MiaAgenda [--all]` | Opens the task view for the brain, or every brain (§9.4). |
+| `:MiaEngramToday [brain]` | Opens today's engram, creating it on first use; only brains with dated filenames (§9.5). |
+| `:MiaEngramLast [brain]` | Opens the engram modified most recently (§9.5). |
+| `:MiaBack` | Goes back to the engram a memoria jump left (§9.1). |
 
 The active brain is in-memory only and starts unset. Anything acting on "the
 current brain" without being given one resolves it in this order:
@@ -1781,10 +1794,6 @@ require('memoria').setup({
   },
   concepts = {
     tag = { fields = { "description" } },
-  },
-  append_templates = {
-    todo = { section = "TASKS", render = "- [ ] %input%" },
-    log  = { section = "LOG",   render = "- %date% — %input%" },
   },
 })
 ```
@@ -2015,7 +2024,7 @@ Rendered (CommonMark, verified): frontmatter table on GitHub, a two-item list,
 a rule, the heading.
 
 The block sits at the top, directly under the frontmatter, so all note data is
-together; the end of the file belongs to `append_to_engram`'s sections (§8.2).
+together.
 
 ### 5.2 Field config
 
@@ -2646,7 +2655,7 @@ there — stays in the report.
 
 ---
 
-## 8. Creating and appending to engrams
+## 8. Creating engrams
 
 ### 8.1 `create_engram(brain_name, opts?)`
 
@@ -2655,7 +2664,7 @@ The standard "start a new note" flow. Content is assembled in two parts: a
 hand-templated) and a **user-authored prose template**.
 
 ```
-create_engram(brain_name, opts?):   -- opts = { title, fields?, body?, concept?, concept_field? }
+create_engram(brain_name, opts?):   -- opts = { title, fields?, body?, concept?, concept_field?, filename? }
                                  -- → { path, cursor } | nil, err, code
   1. resolve brain config
   2. determine filename per config.engrams.filename (§4)
@@ -2686,6 +2695,8 @@ read as flow-list structure rather than text — one holding `[`, `]`, `,`, `:`,
 quote, or edge whitespace — is written double-quoted, so what memoria writes is
 what `parse_frontmatter` reads back. `opts.body` lands where the cursor would,
 so the template's heading and layout still frame it.
+`opts.filename` replaces the computed filename, the prefix check kept — how
+`today_engram` (§9.5) writes the date alone.
 
 A failure that a re-typed title would fix carries a `code`: `empty_slug` for a
 title that slugifies to nothing, `collision` for a filename already taken,
@@ -2742,55 +2753,6 @@ rather than putting it there. The command opens it because you're starting
 something to actively write; the CLI (§11) has no editor to open it in, and so
 simply does not.
 
-### 8.2 `append_to_engram(brain_name, engram_file, template_name, input?)`
-
-Fast, no-buffer-switch capture into an **existing** engram's fenced section — for
-adding a quick line to, say, a running `todo.md` without leaving what you're
-doing.
-
-```lua
-append_templates = {
-  todo = { section = "TASKS", render = "- [ ] %input%" },
-  log  = { section = "LOG",   render = "- %date% — %input%" },
-}
-```
-
-```
-append_to_engram(brain_name, engram_file, template_name, input?):
-  1. resolve brain + engram path
-  2. template = append_templates[template_name]
-  3. if input not provided → prompt (floating window, single line)
-  4. line = render template with %input%, %date% substituted
-  5. body = drafting.api.section.get(lines, template.section) or {}
-     table.insert(body, line)
-     lines = drafting.api.section.set(lines, template.section, body)
-       - no such section → get answers nil, set writes one at the end of the file
-  6. write file silently — no buffer opened, focus stays wherever the user was
-  7. update atlas for that engram
-```
-
-The marker in a task template (`"- [ ] %input%"`) is part of the user's own
-template string — memoria substitutes `%input%` and writes the line as given,
-rather than reassembling the checkbox from a state. This is why the seam has no
-`format_checkbox` (Part 2 §1).
-
-Unlike `create_engram`, this never opens a buffer — the entire point is avoiding a
-context switch. `template_name` is required (not picker-driven), so it's meant to
-be bound directly per-template for speed, e.g. one key for "append a todo to
-work/todo.md."
-
-`append_to_engram`, the synapse block, the generated index and `md-drafting`'s TOC
-generation share the same "read/replace within fixed markers" mechanism, and
-share one implementation of it: `drafting.api.section` (Part 2 §2). Append is
-not a separate operation there — it is the `get`/insert/`set` composition in
-step 5 — and because both functions are pure over lines, this path rewrites a
-file it never opened.
-
-If the engram happens to be loaded in a buffer, writing the file underneath it
-leaves the buffer stale (`W12`/`:checktime`). That case goes through the buffer
-instead: same lines computed from `nvim_buf_get_lines`, written back with
-memoria's minimal-span write (§1.1), buffer saved.
-
 ---
 
 ## 9. Navigation & index
@@ -2816,8 +2778,9 @@ go_back():
 Every plugin action that navigates *to* an engram — following a synapse link,
 following an inline link, opening from a picker or search result — calls
 `push_nav_history(current_engram_path)` immediately before the jump. `go_back()` is
-exposed as a plain function; no default binding, consistent with the rest of both
-plugins' keybind stance.
+a plain function, `:MiaBack` its command; no default binding, consistent with
+the rest of both plugins' keybind stance. Both live in the view (§1.3): the
+history only exists in an editor, and going back opens a buffer.
 
 Movement *within* an engram is not memoria's, and memoria adds nothing to it:
 `md-drafting`'s jump navigation (Part 1 §8) already moves between links,
@@ -2924,7 +2887,7 @@ just removes that one bullet from `INDEX:STATS`, leaving `INDEX:NOT_DONE_TASKS`
 (a different section, despite the shared name) untouched.
 
 ```
-generate_index(brain_name):
+rebuild_index(brain_name):
   1. read atlas for the brain
   2. lines = existing index.md lines, or { "# <Brain name>", "" } for a new file
      for each name in config.sections, in order, build its body and
@@ -2948,7 +2911,7 @@ generate_index(brain_name):
 
        <!-- INDEX:CONCEPTS -->
        - **person**: Alice Smith, Pete Park
-       - **tag**: java, proj_web
+       - **tag**: Java, Web project
        <!-- /INDEX:CONCEPTS -->
 
        <!-- INDEX:ROOTS -->
@@ -2965,17 +2928,19 @@ generate_index(brain_name):
        - [x] Send follow-up email ([Meeting notes](2026-07-31_meeting_notes.md))
        <!-- /INDEX:TASKS -->
 
-  3. write to <brain>/index.md (through the buffer, minimal-span, if it is open — §8.2)
+  3. write to <brain>/index.md (through the buffer, minimal-span, if it is open — §1.1)
 ```
 
 `INDEX:NOT_DONE_TASKS` reads `atlas.tasks.not_done`; `INDEX:TASKS` reads
 `atlas.tasks.not_done` and `atlas.tasks.done` together (§7.1) — no rebuild of their own, one
 line per entry, linking back to the engram it came from. The `[ ]`/`[x]`
-marker is written literally rather than through a formatter, the same way
-`append_templates` strings already carry theirs (§8.2) — there is no
-`format_checkbox` on the seam (§1.1) for either to call. This is the static,
+marker is written literally rather than through a formatter — there is no
+`format_checkbox` on the seam (§1.1) to call. This is the static,
 regenerate-on-request counterpart to `:MiaAgenda` (§9.4): the same underlying
 data, written to a file instead of opened as a live view.
+
+`INDEX:CONCEPTS` reads `atlas.concepts_by_type` (§7.1), which holds keys, and
+writes each concept's `display_name` — the index is read, not grepped.
 
 `INDEX:ROOTS` lists every engram with an empty `up` field — found by one pass
 over `atlas.engrams[*].synapses.up`, no separate index needed. It is the
@@ -3062,8 +3027,8 @@ toggle_task_under_cursor():
        not a task (state nil) or line no longer matches the atlas → notify, rebuild that engram, stop
        new_marker = state == "not_done" and task_markers.done[1] or task_markers.not_done[1]
        line = drafting.api.syntax.format_list_item(prefix, new_marker, text)
-  3. write it back, save — no buffer opened, same pattern as append_to_engram (§8.2),
-     including going through the buffer when the engram is loaded in one
+  3. write_lines (§1.1) — no buffer opened, going through the buffer when the
+     engram is loaded in one
   4. update the atlas for that one engram (incremental, not a full rebuild)
   5. render(state)
 
@@ -3082,68 +3047,78 @@ preference, so the default stays the default across sessions. `za` mirrors
 Neovim's own fold-reveal key, since there is no fold interaction inside this
 buffer to conflict with.
 
-### 9.5 Diary / quick-open
+### 9.5 Today and last
 
-Two related but distinct conveniences — worth keeping separate rather than
-merging, since they answer different questions ("what's today's entry" vs. "what
-did I touch most recently").
+Two conveniences for getting to an engram, kept apart because they answer
+different questions: "where do I write today" and "what was I working on".
 
-**`open_or_create_today(brain_name)`** — opens today's dated entry, creating it if it
-doesn't exist yet. A "diary" is just a brain used this way consistently; no
-separate diary concept needed, since date-prefixed filenames already exist for
-exactly this.
-
-```
-open_or_create_today(brain_name):
-  1. resolve brain config
-  2. expected_filename = today's date (per engrams.filename.date_format) + "_diary"
-       (or whatever slug convention the brain uses — same filename machinery as §4)
-  3. if a file matching expected_filename exists → open it, push_nav_history(previous)
-  4. else → create_engram(brain_name, { title = "diary" })
-       -- same creation flow as any new engram: normal content_template,
-          synapse scaffolding, filename rules, opens the buffer
-```
-
-**`open_last_edited(brain_name)`** — opens whatever engram in the brain was most
-recently modified, purely informational, never creates anything.
+**Today's engram** is the file named by the date alone — `2026-10-01.md`, in
+`engrams.filename.date_format`, with no slug — titled by the date in
+`engrams.date_format`, so the template gives `# 2026-10-01`. It needs a brain
+whose engrams are dated (`filename.prefix = "date"`); in any other brain there
+is no file that is "today's".
 
 ```
-open_last_edited(brain_name):
-  1. read atlas.engrams for the brain
-  2. find the entry with max(modified)
-  3. open it, push_nav_history(previous)
+today_engram(brain_name):   -- → { path, cursor?, created } | nil, err
+  1. resolve brain config; prefix ~= "date" →
+       nil, `today's engram needs engrams.filename.prefix = "date"`
+  2. path = <date in filename.date_format>.md
+  3. exists → { path, created = false }
+  4. else → create_engram(brain_name, { title = <date in date_format>,
+                                        filename = <that file> })
+            → { path, cursor, created = true }
 ```
 
-These can diverge in practice — e.g. yesterday's most-recently-touched engram
-might be an old project note, with no diary entry created yet for today — so
-`open_or_create_today` and `open_last_edited` are kept as two separate functions
-rather than one with a mode flag.
+`open_today(brain?)` is the view: it calls `today_engram`, `push_nav_history`
+(§9.1), and opens the file — at the answered cursor when it was just created.
+Given a brain it acts in that brain or reports the error, which is what a
+mapping bound to one journal brain wants. `:MiaEngramToday [brain]` calls it;
+without a brain it resolves one as §2.2 does, but among the brains that can
+answer only — the current buffer's, the active one, the only one, then a
+picker over those — and says so when no brain is dated.
+
+**The last engram** is whichever engram in the brain was modified most
+recently. It never creates anything.
+
+```
+last_engram(brain_name):    -- → { path } | nil, err
+  1. read atlas.engrams for the brain, refreshed (§7.1)
+  2. the entry with max(modified); an empty brain → nil, err
+```
+
+`open_last(brain?)` opens it after `push_nav_history`; `:MiaEngramLast [brain]`
+calls it.
+
+The two diverge in practice — yesterday's most-recently-touched engram might be
+an old project note, with nothing written today yet — so they stay two
+functions rather than one with a mode flag.
 
 ### 9.6 Engram search
 
-Fuzzy match over an engram's title, filename, tags and participants, read
-from the atlas — no prose/body search, since nothing in the atlas holds
-engram bodies, and that is a different kind of feature.
+Fuzzy match over an engram's title, filename and concept fields, read from
+the atlas — no prose/body search, since nothing in the atlas holds engram
+bodies, and that is a different kind of feature.
 
 ```
-search_engrams(brain_name, query?, opts?):   -- opts = { fields? }
-                                              -- → { path, title, score }[] | nil, err
+search_engrams(brain_name, query, opts?):   -- opts = { fields? }
+                                             -- → { path, title, score }[] | nil, err
   1. resolve brain config
-  2. query = opts given one, or prompt "(brain_name) Search:"
-  3. candidates = atlas.engrams for brain_name, refreshed (§7.1)
-  4. score each candidate's title, filename, tags and participants against
-     query (opts.fields narrows which of these are matched; default: all)
-  5. return candidates sorted by score, best first
+  2. candidates = atlas.engrams for brain_name, refreshed (§7.1)
+  3. score each candidate's title, filename and concept fields against query
+     (opts.fields narrows which of these are matched; default: all). A
+     concept value is matched by what it is written as and by the display
+     name of the concept it resolves to, so `alice` finds `participants:
+     [Alice Smith]` and `tags: [alice_smith]` alike
+  4. return candidates sorted by score, best first
 ```
 
 `:MiaEngramSearch [brain] [query]` resolves the brain through §2.2's
-`resolve()`, the same as every other brain-scoped command; prompts for
-`query` only when not given, step 2's own fallback; and opens a picker over
-the results, `push_nav_history` (§9.1) before opening whichever one is chosen.
+`resolve()`, the same as every other brain-scoped command; asks
+`(work) Search: ` when no query is given; and opens a picker over the
+results, `push_nav_history` (§9.1) before opening whichever one is chosen.
 
-`bin/mia search --query Q [--brain B]` (§11.3) calls the same function with
-both arguments given, so step 2 never prompts — the headless case, same as
-every other CLI command.
+`bin/mia search --query Q [--brain B]` (§11.3) calls the same function, with
+nothing to ask.
 
 The CLI's `engrams [--concept C]` (§11.3) is the exact-match, concept-only
 case of what this searches more generally; the two share the atlas read but
@@ -3156,27 +3131,34 @@ answer different questions.
 Filenames are treated as immutable identity by default (§4) — these are the
 explicit, deliberate exceptions to that rule, not casual operations.
 
-### 10.1 `rename_engram(brain_name, engram_path, new_title?)`
+### 10.1 `rename_engram(brain_name, engram_path, new_title)`
 
 ```
-rename_engram(brain_name, engram_path, new_title?):
+rename_engram(brain_name, engram_path, new_title):   -- → { path } | nil, err, code
   1. resolve brain config
-  2. if new_title not given → prompt for it
-  3. compute new filename: same prefix mode as the original (date/concept/none),
-     new slug derived from new_title
-  4. collision check against existing filenames → same "prompt to edit name" rule as creation (§4)
-  5. rename the file on disk
-  6. scan atlas for every engram whose synapses reference the old path →
+  2. compute new filename: the original's prefix kept, new slug = slugify(new_title) (§4).
+     The prefix is read back from the filename, since `_` is both its
+     separator and a slug's own character: for `date`, the leading date in
+     `filename.date_format`; for `concept`, the longest registered key followed
+     by `_`; nothing matched → no prefix. Today's engram (§9.5), the date alone,
+     becomes `<date>_<new slug>.md`
+  3. empty slug or a filename taken → nil, err, code "empty_slug" / "collision",
+     the codes create_engram answers (§8.1)
+  4. rename the file on disk
+  5. scan atlas for every engram whose synapses reference the old path →
        write_synapse_block(its_lines, ...) with the path updated to the new filename
-  7. best-effort scan of raw engram content, brain-wide, for the old path string
+  6. best-effort scan of raw engram content, brain-wide, for the old path string
      appearing in inline markdown links → replace with the new path
        (this is the one place inline links ARE touched — a rename is a structural
        change to the filesystem, not a content edit, so it's treated differently
        from the "inline links are never materialized" rule for synapses)
-  8. update atlas: move the entry to the new key, update backlinks map accordingly
+  7. refresh the atlas (§7.1)
 ```
 
-Step 7 is a known limitation, not a guarantee: brain-wide raw-text scanning
+Asking for the title, and asking again on those codes with the title filled
+in, is the view's (`:MiaEngramRename`), the same loop as `:MiaEngramCreate`.
+
+Step 6 is a known limitation, not a guarantee: brain-wide raw-text scanning
 catches links written the normal way (`api.syntax.format_link` output), but won't
 catch a manually hand-typed or unusually-formatted link. `rebuild_atlas`'s
 broken-link check (§7.2) is the safety net for anything this step misses.
@@ -3184,16 +3166,19 @@ broken-link check (§7.2) is the safety net for anything this step misses.
 ### 10.2 `delete_engram(brain_name, engram_path, opts?)`
 
 ```
-delete_engram(brain_name, engram_path, opts?):
+delete_engram(brain_name, engram_path, opts?):   -- → { referencing } | nil, err, code
   1. look up atlas entry for engram_path — its synapses and backlinks
   2. referencing = other engrams whose synapses point here, or that inline-link here
-  3. if referencing is non-empty and not opts.force:
-       prompt for confirmation, showing the count/list of referencing engrams
+  3. referencing non-empty and not opts.force → nil, err, code "referenced",
+     with the referencing filenames in the error
   4. for each referencing engram with a synapse field pointing to engram_path:
        remove that value from the field, write_synapse_block to persist
   5. delete the file from disk
-  6. remove the entry from the atlas; drop it from any backlinks/concepts lists it appeared in
+  6. refresh the atlas (§7.1)
 ```
+
+The confirmation — the count and list of referencing engrams, then
+`opts.force` on yes — is the view's (`:MiaEngramDelete`).
 
 Structural synapse references are actively cleaned up (step 4), matching how
 `attach_synapse` keeps both sides in sync — deleting should undo that sync, not leave
@@ -3287,6 +3272,8 @@ named brain, or the only one registered.
 | `brains` | the registry (§2.1) | name, location, whether it exists |
 | `engrams [--concept C]` | the atlas, refreshed (§7.1) | per engram: filename, title, concept fields, `modified`; only those referencing `C` when given |
 | `search --query Q [--fields F]` | `search_engrams` (§9.6) | matching engrams, best first, each with its score |
+| `rebuild-index` | `rebuild_index` (§9.3) | the path of `index.md` as written |
+| `today` | `today_engram` (§9.5) | today's engram's path, and whether it was just created; a brain without dated filenames is an error |
 | `engram <file>` | the atlas + the file | its atlas entry, its backlinks, its content |
 | `tasks [--state not_done\|done]` | the atlas's `tasks` | the bucket, or both |
 | `check` | `rebuild_atlas` (§7.2) | the problems, each with file, line and kind |
@@ -3321,11 +3308,17 @@ The surface is **reading and adding**. `rename_engram` and `delete_engram`
 brain-wide inline-link rewrite, a delete that cascades into every synapse
 pointing at it — which is a change for someone to confirm, not for something
 running unattended to do unasked. `mention_concept` (§9.2) is not on it
-either: it writes at a cursor, which a shell does not have.
+either: it writes at a cursor, which a shell does not have. Nor is the
+navigation (§9.1, §9.4, `:MiaEngramLast`): it only opens windows. `today` is
+the exception, since creating today's engram with its header is a write only
+memoria does correctly — it is named for where it goes, as `:MiaEngramToday`
+is (§1). The agenda's task toggle stays off too — a task
+is plain markdown, and the atlas picks up a `[ ]` flipped by anything, so a
+script edits the line itself.
 
 Every later feature the CLI can carry gets its command in the same change that
 adds the feature — `concepts` and `create-concept` came with the registry (§6),
-`append` comes with `append_to_engram` (§8.2) — and nothing else changes: the
+`search` comes with `search_engrams` (§9.6) — and nothing else changes: the
 command table is the one list, and `commands` reads it.
 
 ### 11.4 Running beside the editor
@@ -3371,14 +3364,10 @@ is derived and rebuildable by definition.
   index section and stat names — because they are `md-drafting`'s state names
   (`TASK_STATES`, `NOT_DONE_TASK`) and `task_markers` is passed through to
   `parse_checkbox` untranslated (§7.1).
-- **The section seam is `get`/`set`, nothing more** (Part 2 §2) — append is
-  memoria's composition of the two, first-write placement is memoria's
+- **The section seam is `get`/`set`, nothing more** (Part 2 §2) — any other
+  edit is memoria's composition of the two, first-write placement is memoria's
   `opts.at`, and writing into a loaded buffer is memoria's minimal-span helper
   (§1.1). None of those are asked of `md-drafting`.
-- **`:MiaEngramCreate` opens the buffer; `append_to_engram` never does** —
-  deliberately asymmetric, matching their different purposes (start writing vs.
-  quick capture without interrupting current work). Both functions themselves
-  stay headless (§1.3): the asymmetry is in what the commands do with them.
 - **`md-drafting.nvim` is a hard dependency**, not optional — memoria's
   link/checkbox handling relies on it directly rather than duplicating syntax
   logic.
@@ -3433,9 +3422,12 @@ is derived and rebuildable by definition.
   independently written timestamp could disagree with them. `%date%` has one
   format wherever it is rendered, `engrams.date_format`; filenames have their
   own `filename.date_format`.
-- **`open_or_create_today` and `open_last_edited` stay separate functions** — "today's
-  entry" and "most recently touched engram" can genuinely diverge, so merging
-  them into one mode-flagged function would misrepresent what each guarantees.
+- **Today's and the last engram stay separate functions** — "today's engram"
+  and "most recently touched engram" can genuinely diverge, so merging them
+  into one mode-flagged function would misrepresent what each guarantees.
+- **Today's engram is the date alone, and only in a dated brain** (§9.5) — the
+  date says what it is, so there is no slug to invent; a brain without dated
+  filenames has no file that is "today's", which is said rather than guessed.
 - **Rename touches inline links (best-effort); delete does not** — a rename is a
   filesystem-identity change and needs its links repaired to stay correct; a
   delete's dangling inline references are left for `rebuild_atlas` to report,
@@ -3465,6 +3457,9 @@ is derived and rebuildable by definition.
   orphan from the start, so the editor only creates one where it is used.
   Registering then runs the rebuild's concept-form repair on the engrams it
   touched — the same judgment-free rewrite, not a second implementation of it.
+- **Navigation commands take no verb** (§1) — opening the agenda, today's
+  entry, the last engram or going back changes nothing, so there is no verb to
+  name; a verb such as Open would be added only to satisfy the table.
 - **One meaning per verb** (§1) — `Add` used to mean record, make and relate
   at once; Register, Create and Attach each mean one of them, with an inverse.
   A command is named for what it does to its noun, not for the noun alone.
