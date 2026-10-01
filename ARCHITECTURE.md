@@ -2239,6 +2239,11 @@ edit_frontmatter_field(opts):   -- opts = { source?, field, value }
   5. refresh the atlas (§7.1)
 ```
 
+It and `attach_concept` (§6.4) share one `update_field(source, name, kind,
+edit)` for steps 1, 4 and 5 — locate, read, write back through a loaded
+buffer, refresh — and differ only in the `edit` that turns the field's values
+into new ones.
+
 `:MiaFrontmatterEdit [field] [value]` asks for the field ("(work) Frontmatter
 field:", skipped when only one field qualifies), then the value, pre-filled
 with the current one for a `list = false` field. The CLI's `edit-frontmatter`
@@ -2294,18 +2299,13 @@ Flat object, visible (not hidden), hand-editable:
 - Written two-space indented with keys sorted, one per line: it is the file
   meant for hand-editing, and a problem pointing at an entry (§7.2) needs a row
   to point at. Empty `aliases`/`meta` are left out rather than written empty.
-- Collisions are slug-derived: `Alice Smith`, `alice smith` and `Alice-Smith`
-  are one key, so a near-duplicate entry is refused at creation rather than
-  becoming a second person. A slug already taken is asked for again, and is
-  an error headless — the same rule as a filename (§4).
-- Changing a `display_name` is cheap: `slug`-form fields never held it, and in
-  a `display_name`-form field the old name still resolves — through its slug
-  (§6.3, step 4), or, where the slug does not reproduce it, once the old name is kept
-  as an alias — so it is
-  reported as `non_canonical_mention` and `:MiaAtlasRebuild!` rewrites every
-  one (§7.2). Changing a **key** means propagating it to every engram and prose
-  mention using it, and to filenames prefixed with it — the same class of
-  problem as a file rename, with no separate `id` layer, traded for readability.
+- Collisions are slug-derived: `Alice Smith` and `alice-smith` are one key, so
+  a near-duplicate is refused rather than becoming a second person — asked
+  again in the editor, an error headless, as for a filename (§4).
+- Renaming the `display_name` is cheap: the old name still resolves (by slug,
+  or kept as an alias), so `:MiaAtlasRebuild!` rewrites it (§7.2). Renaming the
+  **key** means propagating it to every engram, prose mention and prefixed
+  filename — the cost of having no separate `id` layer.
 
 ### 6.2 Concept type schemas (config, under `concepts` in `setup({})`)
 
