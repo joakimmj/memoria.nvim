@@ -2,13 +2,19 @@
 -- it is about, and the one-line prompt.
 local M = {}
 
---- Ask for a value; nil when cancelled.
+-- What input() answers on <Esc>; typed input cannot hold a line break.
+local CANCELLED = "\n"
+
+--- Ask for a value; nil when cancelled, with <Esc> or <C-c>.
 ---@param prompt string What to ask, already brain-named
 ---@param default? string Filled in, so leaving it alone keeps it
 ---@return string? answer
 function M.ask(prompt, default)
-  local ok, value = pcall(vim.fn.input, prompt, default or "")
-  return ok and value or nil
+  local ok, value = pcall(vim.fn.input, { prompt = prompt, default = default or "", cancelreturn = CANCELLED })
+  if not ok or value == nil or value == CANCELLED then
+    return nil
+  end
+  return value
 end
 
 --- Say something.
@@ -27,6 +33,32 @@ end
 ---@param text string
 function M.error(text)
   vim.notify("memoria: " .. text, vim.log.levels.ERROR)
+end
+
+--- Choose one of a brain's fields: the one given, refused when it is not
+--- among them; the only one; or one picked.
+---@param brain_name string
+---@param fields string[] The fields to choose from
+---@param given? string A field already named
+---@param labels { kind: string, prompt: string } kind: as in "no concept field", prompt: the picker's
+---@param run fun(field: string) Called once chosen
+function M.pick_field(brain_name, fields, given, labels, run)
+  if given then
+    if not vim.tbl_contains(fields, given) then
+      return M.error(M.in_brain(brain_name, ("no %s field '%s'"):format(labels.kind, given)))
+    end
+    return run(given)
+  elseif #fields == 0 then
+    return M.warn(M.in_brain(brain_name, ("no %s fields configured"):format(labels.kind)))
+  elseif #fields == 1 then
+    return run(fields[1])
+  end
+
+  vim.ui.select(fields, { prompt = M.in_brain(brain_name, labels.prompt) }, function(choice)
+    if choice then
+      run(choice)
+    end
+  end)
 end
 
 --- Name the brain a message is about, e.g. "(work) Engram title: ". Which

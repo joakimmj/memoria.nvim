@@ -593,10 +593,16 @@ check("registry is an object when empty", vim.fn.readfile(brain.registry_path())
 
 local prompts = {}
 local answers = { "Prompt Test", "Prompt Test", "Prompt Test Two" }
+-- An answer of ESC is <Esc>: input() then gives back its cancelreturn.
+local ESC = {}
 ---@diagnostic disable-next-line: duplicate-set-field
-vim.fn.input = function(message)
-  table.insert(prompts, message)
-  return table.remove(answers, 1)
+vim.fn.input = function(opts)
+  table.insert(prompts, opts.prompt)
+  local answer = table.remove(answers, 1)
+  if answer == ESC then
+    return opts.cancelreturn
+  end
+  return answer
 end
 
 brain.register(scratch .. "/prompts", "prompted")
@@ -1587,6 +1593,21 @@ check(
 )
 vim.cmd("enew")
 
+-- A concept no field takes is refused before the title is asked.
+local with_room = concept_lib.read(prefixed.location)
+with_room.kitchen = { display_name = "Kitchen", type = "room" }
+concept_lib.write(prefixed.location, with_room)
+selects, choices, prompts, answers, notified = {}, { "kitchen" }, {}, {}, nil
+vim.cmd("MiaEngramCreate prefixed")
+check(
+  "MiaEngramCreate, a concept no field takes is refused",
+  notified,
+  "memoria: (prefixed) no concept field takes a room"
+)
+check("MiaEngramCreate, before the title is asked", prompts, {})
+with_room.kitchen = nil
+concept_lib.write(prefixed.location, with_room)
+
 -- modules: atlas, a concept in a field that takes another type
 
 vim.fn.writefile({ "---", "tags: [alice]", "---", "# Wrong" }, prefixed.location .. "/wrong.md")
@@ -1725,6 +1746,9 @@ prompts, answers = {}, { "2022-02-02" }
 vim.cmd("MiaFrontmatterEdit")
 check("MiaFrontmatterEdit, one value field: asks its value, filled in", prompts, { "(made) created: " })
 check("MiaFrontmatterEdit, what was answered", vim.fn.readfile(edited_path)[2], "created: 2022-02-02")
+prompts, answers = {}, { ESC }
+vim.cmd("MiaFrontmatterEdit")
+check("MiaFrontmatterEdit, <Esc> cancels rather than clears", vim.fn.readfile(edited_path)[2], "created: 2022-02-02")
 notified = nil
 vim.cmd("MiaFrontmatterEdit tags x")
 check("MiaFrontmatterEdit, a concept field refused", notified, "memoria: (made) no value field 'tags'")

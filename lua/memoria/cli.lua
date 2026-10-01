@@ -99,6 +99,30 @@ local function rebuilt(target, fix)
   return { brain = target.name, engrams = vim.tbl_count(result.atlas.engrams), problems = problems }
 end
 
+--- `name=value` split at the first `=`, the name trimmed.
+---@param item string As typed after the option
+---@return string? name Nil when there is no `=`
+---@return string value What follows the `=`
+local function split_assignment(item)
+  local name, value = item:match("^([^=]+)=(.*)$")
+  return name and vim.trim(name), value or ""
+end
+
+--- A concept as the CLI hands it out: its meta kept an object when empty.
+---@param entry memoria.Concept
+---@return table
+local function concept_json(entry)
+  return vim.tbl_extend("force", entry, { meta = object(entry.meta) })
+end
+
+--- The path of an engram named on the command line, in the brain acted in.
+---@param target memoria.Brain
+---@param name string Filename as typed, a path or not
+---@return string path
+local function engram_path(target, name)
+  return target.location .. "/" .. vim.fs.basename(name)
+end
+
 --- `--field name=value,value` into `opts.fields`, once per field.
 ---@param items? string[] What --field was given, once per time it was
 ---@return table<string, string[]>? fields
@@ -106,7 +130,7 @@ end
 local function parse_fields(items)
   local fields = {}
   for _, item in ipairs(items or {}) do
-    local name, value = item:match("^([^=]+)=(.*)$")
+    local name, value = split_assignment(item)
     if not name then
       return nil, "--field takes name=value"
     end
@@ -131,11 +155,11 @@ end
 local function parse_meta(items)
   local meta = {}
   for _, item in ipairs(items or {}) do
-    local name, value = item:match("^([^=]+)=(.*)$")
+    local name, value = split_assignment(item)
     if not name then
       return nil, "--meta takes name=value"
     end
-    meta[vim.trim(name)] = vim.trim(value)
+    meta[name] = vim.trim(value)
   end
   return meta
 end
@@ -258,15 +282,12 @@ M.commands = {
         local listed = {}
         for _, entry in ipairs(concepts) do
           if not wanted or entry.type == wanted then
-            table.insert(listed, {
-              key = entry.key,
-              display_name = entry.display_name,
-              type = entry.type,
-              aliases = entry.aliases,
-              note = entry.note,
-              meta = object(entry.meta),
-              engrams = current and current.concepts[entry.key] or {},
-            })
+            table.insert(
+              listed,
+              vim.tbl_extend("force", concept_json(entry), {
+                engrams = current and current.concepts[entry.key] or {},
+              })
+            )
           end
         end
         return { brain = target.name, concepts = listed }
@@ -340,7 +361,7 @@ M.commands = {
         name = "--field",
         value = "name=value",
         repeated = true,
-        description = "Frontmatter field values, comma-separated; once per field",
+        description = "Frontmatter field values, comma-separated (so a value holds no comma); once per field",
       },
       { name = "--body", value = "text", description = "Prose put where %cursor% is; '-' reads stdin" },
       {
@@ -391,7 +412,7 @@ M.commands = {
     },
     run = function(args)
       return in_brain(args, function(target)
-        local source = target.location .. "/" .. vim.fs.basename(args.positional[1])
+        local source = engram_path(target, args.positional[1])
         local added, err = synapse.attach_synapse({
           source = source,
           field = args.positional[2],
@@ -438,7 +459,7 @@ M.commands = {
         if not created then
           return nil, create_err
         end
-        return { brain = target.name, concept = vim.tbl_extend("force", created, { meta = object(created.meta) }) }
+        return { brain = target.name, concept = concept_json(created) }
       end)
     end,
   },
@@ -479,7 +500,7 @@ M.commands = {
         if not written then
           return nil, write_err
         end
-        return { brain = target.name, concept = vim.tbl_extend("force", written, { meta = object(written.meta) }) }
+        return { brain = target.name, concept = concept_json(written) }
       end)
     end,
   },
@@ -495,7 +516,7 @@ M.commands = {
     run = function(args)
       return in_brain(args, function(target)
         local attached, err = concept.attach_concept({
-          source = target.location .. "/" .. vim.fs.basename(args.positional[1]),
+          source = engram_path(target, args.positional[1]),
           field = args.positional[2],
           concept = args.positional[3],
         })
@@ -518,7 +539,7 @@ M.commands = {
     run = function(args)
       return in_brain(args, function(target)
         return frontmatter.edit_frontmatter_field({
-          source = target.location .. "/" .. vim.fs.basename(args.positional[1]),
+          source = engram_path(target, args.positional[1]),
           field = args.positional[2],
           value = args.positional[3],
         })

@@ -510,8 +510,9 @@ brain is registered (|memoria-brains|).
     create-engram --title T [--field name=value,...] [--body text|-]
                [--concept C] [--concept-field F]
                             Create an engram, opening nothing. --field once
-                            per frontmatter field, a value field's replacing
-                            its default; --body - reads stdin, so
+                            per frontmatter field, values comma-separated
+                            (so none holds a comma), a value field's
+                            replacing its default; --body - reads stdin, so
                             multi-line prose needs no shell quoting;
                             --concept names the concept a brain with
                             `prefix = "concept"` prefixes it with, and
@@ -615,8 +616,6 @@ an error naming no brain. The CLI (|memoria-cli|) calls only the second.
         create prompt) and `concept_type` (all this field takes, and the
         type a new one is given; left out, every concept, and a new one's
         type is asked). See |memoria-concepts-pick|.
-    memoria.concept.pick_field({brain}, {fields}, {run})
-        Pick which concept field to write in, and pass it to {run}.
 
     memoria.frontmatter.edit_frontmatter_field({opts})
         Set a value field on the current engram. {opts}.source (path,
@@ -674,6 +673,10 @@ Every function below answers a result, or nil and an error.
         The filename a slug gets under the configured prefix. {opts} takes
         `time` and `concept` (a key).
 
+    memoria.core.frontmatter.update_field({source}, {name}, {kind}, {edit})
+        Change one frontmatter field of kind {kind} ("concept" or "value"):
+        {edit} gets its values as a list and answers the new ones, or nil and
+        an error. Returns `{ brain, source, values }`.
     memoria.core.frontmatter.edit_frontmatter_field({opts})
         Set a value field on an engram and refresh the atlas. {opts}.source
         (path), {opts}.field and {opts}.value are required; "" clears.

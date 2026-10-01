@@ -2,6 +2,7 @@
 local M = {}
 
 local config = require("memoria.config")
+local file = require("memoria.lib.file")
 local frontmatter = require("memoria.modules.frontmatter")
 local frontmatter_lib = require("memoria.lib.frontmatter")
 local md_drafting = require("memoria.lib.md-drafting")
@@ -30,7 +31,8 @@ function M.edit_frontmatter_field(opts)
     if not value then
       local current
       if cfg.frontmatter[field].list == false then
-        local lines = vim.fn.readfile(target.location .. "/" .. located.filename)
+        -- Through the buffer, so unsaved edits are what is filled in.
+        local lines = file.read_lines(target.location .. "/" .. located.filename) or {}
         local fields = md_drafting.syntax.parse_frontmatter(lines) or {}
         local held = fields[field]
         current = type(held) == "string" and held or nil
@@ -52,23 +54,13 @@ function M.edit_frontmatter_field(opts)
     message.info(message.in_brain(target.name, ("%s %s → %s"):format(edited.source, edited.field, shown)))
   end
 
-  local fields = frontmatter_lib.field_names(cfg.frontmatter, "value")
-  if opts.field then
-    if not vim.tbl_contains(fields, opts.field) then
-      return message.error(message.in_brain(target.name, ("no value field '%s'"):format(opts.field)))
-    end
-    ask_value(opts.field)
-  elseif #fields == 0 then
-    message.warn(message.in_brain(target.name, "no value fields configured"))
-  elseif #fields == 1 then
-    ask_value(fields[1])
-  else
-    vim.ui.select(fields, { prompt = message.in_brain(target.name, "Frontmatter field:") }, function(choice)
-      if choice then
-        ask_value(choice)
-      end
-    end)
-  end
+  message.pick_field(
+    target.name,
+    frontmatter_lib.field_names(cfg.frontmatter, "value"),
+    opts.field,
+    { kind = "value", prompt = "Frontmatter field:" },
+    ask_value
+  )
 end
 
 return M

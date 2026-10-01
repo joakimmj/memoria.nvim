@@ -6,11 +6,8 @@ local atlas = require("memoria.modules.atlas")
 local brain = require("memoria.modules.brain")
 local concept = require("memoria.lib.concept")
 local config = require("memoria.config")
-local file = require("memoria.lib.file")
-local frontmatter = require("memoria.lib.frontmatter")
-local md_drafting = require("memoria.lib.md-drafting")
+local frontmatter_module = require("memoria.modules.frontmatter")
 local slug = require("memoria.lib.slug")
-local synapse_module = require("memoria.modules.synapse")
 
 ---@class memoria.Concept
 ---@field key string Registry key, a slug
@@ -348,69 +345,39 @@ end
 ---@return memoria.AttachedConcept? attached What was written
 ---@return string? err
 function M.attach_concept(opts)
-  local located, err = synapse_module.locate(opts.source or vim.api.nvim_buf_get_name(0))
-  if not located then
-    return nil, err
-  end
-  local target = located.brain
-
-  local cfg = config.load_brain_config(target.location)
-  local field = opts.field and cfg.frontmatter[opts.field]
-  if not field or field.kind ~= "concept" then
-    return nil, ("no concept field '%s'"):format(opts.field or "")
-  end
-
   local mention = opts.concept and vim.trim(opts.concept) or ""
   if mention == "" then
     return nil, "a concept is required"
   end
-  local registry = concept.read(target.location)
-  local text, key = concept.canonical(registry, concept.form(cfg, opts.field), mention)
 
-  -- A typed field takes that one type. A name the registry does not answer to
-  -- has no type, so it contradicts nothing and goes in as written.
-  local concept_type = key and registry[key].type or nil
-  if not concept.accepts(cfg, opts.field, concept_type) then
-    return nil, ("%s is a %s, %s takes %s"):format(key, concept_type, opts.field, field.concept_type)
-  end
-
-  local path = target.location .. "/" .. located.filename
-  local lines = file.read_lines(path)
-  if not lines then
-    return nil, "cannot read " .. located.filename
-  end
-
-  local fields, _, fm_err = md_drafting.syntax.parse_frontmatter(lines)
-  if fm_err then
-    return nil, ("%s: frontmatter: %s"):format(located.filename, fm_err)
-  end
-
-  local values = frontmatter.as_list(fields and fields[opts.field])
-  local present = false
-  for _, value in ipairs(values) do
-    present = present or value == text or (key ~= nil and concept.resolve(registry, value) == key)
-  end
-
-  if not present then
-    values = field.list == false and { text } or vim.list_extend(values, { text })
-
-    -- md-drafting refuses a field it cannot rewrite whole (a block scalar, a
-    -- nested mapping, a key written twice) rather than leave half of it behind.
-    local written, set_err = frontmatter.set_field(lines, opts.field, field, values)
+  local text
+  local updated, err = frontmatter_module.update_field(opts.source, opts.field, "concept", function(values, target, cfg)
+    local registry = concept.read(target.location)
+    local written, refused = concept.field_values(cfg, registry, opts.field, { mention })
     if not written then
-      return nil, ("%s: %s"):format(located.filename, set_err)
+      return nil, refused
     end
-    local ok, write_err = file.write_lines(path, written)
-    if not ok then
-      return nil, write_err
-    end
-  end
+    text = written[1]
 
-  local _, refresh_err = atlas.refresh(target)
-  if refresh_err then
-    return nil, refresh_err
+    if cfg.frontmatter[opts.field].list == false then
+      return { text }
+    end
+
+    -- Already there, in any spelling: nothing to add.
+    local resolve = concept.resolver(registry)
+    local key = resolve(mention)
+    for _, value in ipairs(values) do
+      if value == text or (key and resolve(value) == key) then
+        return values
+      end
+    end
+    table.insert(values, text)
+    return values
+  end)
+  if not updated then
+    return nil, err
   end
-  return { brain = target.name, source = located.filename, field = opts.field, concept = text }
+  return { brain = updated.brain.name, source = updated.source, field = opts.field, concept = text }
 end
 
 --- The meta keys a concept of this type is asked for, from config.

@@ -248,6 +248,7 @@ local function derive(atlas, cfg, registry)
   atlas.backlinks, atlas.concepts = {}, {}
   atlas.concepts_by_type = concept.by_type(registry)
   local concept_fields = frontmatter.field_names(cfg.frontmatter, "concept")
+  local resolve = concept.resolver(registry)
 
   for name, entry in pairs(atlas.engrams) do
     for _, targets in pairs(entry.synapses) do
@@ -260,7 +261,7 @@ local function derive(atlas, cfg, registry)
     end
     for _, field in ipairs(concept_fields) do
       for _, mention in ipairs(entry[field] or {}) do
-        add_to(atlas.concepts, concept.resolve(registry, mention) or mention, name)
+        add_to(atlas.concepts, resolve(mention) or mention, name)
       end
     end
   end
@@ -375,6 +376,7 @@ function M.check(atlas, cfg, registry)
   registry = registry or {}
   local declared = next(registry) ~= nil
   local concept_fields = frontmatter.field_names(cfg.frontmatter, "concept")
+  local resolve = concept.resolver(registry)
 
   local problems = {}
   local engram_names = vim.tbl_keys(atlas.engrams)
@@ -439,7 +441,7 @@ function M.check(atlas, cfg, registry)
         local canonical = false
 
         for _, mention in ipairs(entry[field] or {}) do
-          local key = concept.resolve(registry, mention)
+          local key = resolve(mention)
           if not key then
             table.insert(problems, {
               engram = name,
@@ -527,9 +529,31 @@ local function rewrite_field(target, cfg, registry, filename, field)
   return false
 end
 
+--- Rewrite every concept field a problem says is not in its form, in the
+--- engrams `wanted` names, or all of them without it.
+---@param target memoria.Brain
+---@param cfg memoria.Config
+---@param registry memoria.ConceptRegistry
+---@param problems memoria.AtlasProblem[]
+---@param wanted? table<string, boolean> Filenames to rewrite in
+---@return string[] rewritten The filenames that changed, sorted
+local function apply_rewrites(target, cfg, registry, problems, wanted)
+  local rewritten = {}
+  for _, problem in ipairs(problems) do
+    local engram = problem.engram
+    if problem.rewrite and engram and (not wanted or wanted[engram]) then
+      if rewrite_field(target, cfg, registry, engram, problem.rewrite) then
+        rewritten[engram] = true
+      end
+    end
+  end
+  local names = vim.tbl_keys(rewritten)
+  table.sort(names)
+  return names
+end
+
 --- The rebuild's concept-form repair, for some engrams only: every concept
 --- field there not in its form is rewritten, as `:MiaAtlasRebuild!` would.
---- What registering a concept runs on the engrams naming it.
 ---@param target memoria.Brain
 ---@param filenames string[] Engrams to repair
 ---@return string[]? rewritten The filenames that changed
@@ -542,26 +566,17 @@ function M.fix_forms(target, filenames)
 
   local cfg = config.load_brain_config(target.location)
   local registry = concept.read(target.location)
-  local wanted, rewritten = {}, {}
+  local wanted = {}
   for _, filename in ipairs(filenames) do
     wanted[filename] = true
   end
-
-  for _, problem in ipairs(M.check(atlas, cfg, registry)) do
-    if problem.rewrite and wanted[problem.engram] then
-      if rewrite_field(target, cfg, registry, problem.engram, problem.rewrite) then
-        rewritten[problem.engram] = true
-      end
-    end
-  end
+  local rewritten = apply_rewrites(target, cfg, registry, M.check(atlas, cfg, registry), wanted)
 
   local _, refresh_err = M.refresh(target)
   if refresh_err then
     return nil, refresh_err
   end
-  local names = vim.tbl_keys(rewritten)
-  table.sort(names)
-  return names
+  return rewritten
 end
 
 --- Write every missing inverse, rewrite every concept field not in its form,
@@ -578,10 +593,8 @@ local function fix(target, problems, registry)
     if repair then
       synapse_module.connect(target, repair.source, repair.target, repair.field)
     end
-    if problem.rewrite and problem.engram then
-      rewrite_field(target, cfg, registry, problem.engram, problem.rewrite)
-    end
   end
+  apply_rewrites(target, cfg, registry, problems)
 
   for name, kind in vim.fs.dir(target.location) do
     if kind == "file" and name:match("%.md$") then

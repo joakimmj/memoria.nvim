@@ -137,14 +137,10 @@ function M.header(cfg, fields, opts)
       end
 
       if field.kind == "concept" then
-        for _, value in ipairs(values) do
-          local key = concept_lib.resolve(registry, value)
-          local concept_type = key and registry[key].type or nil
-          if not concept_lib.accepts(cfg, name, concept_type) then
-            return nil, ("%s is a %s, %s takes %s"):format(key, concept_type, name, field.concept_type)
-          end
+        values, err = concept_lib.field_values(cfg, registry, name, values)
+        if not values then
+          return nil, err
         end
-        values = concept_lib.canonical_list(registry, concept_lib.form(cfg, name), values)
       elseif fields[name] == nil and type(field.default) == "string" then
         values = { M.render_placeholders(field.default, vars) }
       end
@@ -280,7 +276,10 @@ function M.create_engram(brain_name, opts)
       field = candidates[1]
     end
 
-    local values = given_list(field, fields[field]) or {}
+    local values, given_err = given_list(field, fields[field])
+    if not values then
+      return nil, given_err
+    end
     table.insert(values, prefix)
     fields[field] = cfg.frontmatter[field].list == false and { prefix } or values
   end

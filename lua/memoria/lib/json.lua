@@ -57,7 +57,7 @@ function M.encode_pretty(value, indent)
   table.sort(keys)
   for index, key in ipairs(keys) do
     local rendered = nest(value[key])
-    rendered[1] = ("%s%s: %s"):format(inner, vim.json.encode(tostring(key)), rendered[1]:gsub("^%s+", ""))
+    rendered[1] = ("%s%s: %s"):format(inner, vim.json.encode(tostring(key)), (rendered[1]:gsub("^%s+", "")))
     if index < #keys then
       rendered[#rendered] = rendered[#rendered] .. ","
     end

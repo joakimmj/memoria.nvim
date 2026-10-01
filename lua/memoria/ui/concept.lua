@@ -66,7 +66,7 @@ local function pick_type(target, run)
   end)
 end
 
---- Register a concept: its display name, its slug (derived, editable), its
+--- Create a concept: its display name, its slug (derived, editable), its
 --- type, then whatever its type is asked for. A `name` given is taken as given;
 --- a `suggest`ed one is only filled into the prompt, for a mention that may want
 --- correcting before it becomes a name. A `concept_type` is the field's own,
@@ -109,7 +109,7 @@ local function create(target, opts, run)
   pick_type(target, finish)
 end
 
---- Pick a concept from the brain's registry, or register one. The interaction
+--- Pick a concept from the brain's registry, or create one. The interaction
 --- shared by every place a concept is chosen — see |memoria-concepts|.
 ---@param target memoria.Brain Whose registry is picked from
 ---@param opts? { prompt?: string, name?: string, concept_type?: string } concept_type: all this field takes; none, every type
@@ -155,18 +155,6 @@ function M.pick_or_create(target, opts, run)
   end)
 end
 
---- Ask which concept field to write in, when more than one takes the concept.
----@param target memoria.Brain
----@param fields string[] The fields that take it
----@param run fun(field: string) Called once picked
-function M.pick_field(target, fields, run)
-  vim.ui.select(fields, { prompt = message.in_brain(target.name, "Concept field:") }, function(choice)
-    if choice then
-      run(choice)
-    end
-  end)
-end
-
 --- Put a concept in one of the current engram's concept fields, asking for
 --- whatever `opts` leaves out: the field, then the concept, from the ones that
 --- field takes. The engram decides the brain.
@@ -205,19 +193,13 @@ function M.attach_concept(opts)
     end)
   end
 
-  local fields = frontmatter_lib.field_names(cfg.frontmatter, "concept")
-  if opts.field then
-    if not vim.tbl_contains(fields, opts.field) then
-      return message.error(message.in_brain(target.name, ("no concept field '%s'"):format(opts.field)))
-    end
-    pick_concept(opts.field)
-  elseif #fields == 0 then
-    message.warn(message.in_brain(target.name, "no concept fields configured"))
-  elseif #fields == 1 then
-    pick_concept(fields[1])
-  else
-    M.pick_field(target, fields, pick_concept)
-  end
+  message.pick_field(
+    target.name,
+    frontmatter_lib.field_names(cfg.frontmatter, "concept"),
+    opts.field,
+    { kind = "concept", prompt = "Concept field:" },
+    pick_concept
+  )
 end
 
 --- Fill in a concept's meta, picked when not named.
@@ -307,8 +289,8 @@ function M.register_undeclared_concepts(brain_name)
   end)
 end
 
---- Echo every concept by type: name, its aliases, how many engrams name it,
---- and ⚠ when none do.
+--- Echo every concept by type: display name, how many engrams name it, key,
+--- aliases, and ⚠ when nothing names it.
 ---@param brain_name? string Brain name, default: resolved (see ui/brain.resolve)
 function M.print_list(brain_name)
   ui_brain.resolve(brain_name, function(target)
@@ -326,11 +308,13 @@ function M.print_list(brain_name)
       width = math.max(width, vim.fn.strdisplaywidth(entry.display_name))
     end
 
-    -- By type, then by name inside it: the list answers "what is in this
-    -- brain", and the type is how you read it.
+    -- By type, then by the name shown inside it.
     table.sort(concepts, function(a, b)
       local left, right = a.type or "", b.type or ""
-      return left == right and a.key < b.key or left < right
+      if left ~= right then
+        return left < right
+      end
+      return a.display_name:lower() < b.display_name:lower()
     end)
 
     local chunks, shown = {}, nil

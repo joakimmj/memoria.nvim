@@ -40,17 +40,25 @@ local function complete_fields(names)
   end
 end
 
---- Synapse fields, or frontmatter fields of one kind.
----@param kind? "concept"|"value" Nil: synapse fields
+--- A brain's synapse fields.
+---@param cfg memoria.Config
+---@return string[]
+local function synapse_fields(cfg)
+  return synapse_lib.field_names(cfg.synapses)
+end
+
+--- A brain's frontmatter fields of one kind.
+---@param kind "concept"|"value"
 ---@return fun(cfg: memoria.Config): string[]
-local function fields_of(kind)
+local function frontmatter_fields(kind)
   return function(cfg)
-    if not kind then
-      return synapse_lib.field_names(cfg.synapses)
-    end
     return frontmatter_lib.field_names(cfg.frontmatter, kind)
   end
 end
+
+local complete_synapse_fields = complete_fields(synapse_fields)
+local complete_concept_fields = complete_fields(frontmatter_fields("concept"))
+local complete_value_fields = complete_fields(frontmatter_fields("value"))
 
 --- Create every command. Safe to call again.
 function M.create()
@@ -80,17 +88,17 @@ function M.create()
 
   create("MiaSynapseAttach", function(cmd)
     ui_synapse.attach_synapse({ field = cmd.fargs[1] })
-  end, { nargs = "?", complete = complete_fields(fields_of()), desc = "Link the current engram to another" })
+  end, { nargs = "?", complete = complete_synapse_fields, desc = "Link the current engram to another" })
 
   -- Everything after the field is the value, spaces and all.
   create("MiaFrontmatterEdit", function(cmd)
     local value = #cmd.fargs > 1 and table.concat(vim.list_slice(cmd.fargs, 2), " ") or nil
     ui_frontmatter.edit_frontmatter_field({ field = cmd.fargs[1], value = value })
-  end, { nargs = "*", complete = complete_fields(fields_of("value")), desc = "Set a frontmatter value" })
+  end, { nargs = "*", complete = complete_value_fields, desc = "Set a frontmatter value" })
 
   create("MiaConceptAttach", function(cmd)
     ui_concept.attach_concept({ field = cmd.fargs[1] })
-  end, { nargs = "?", complete = complete_fields(fields_of("concept")), desc = "Put a concept on the current engram" })
+  end, { nargs = "?", complete = complete_concept_fields, desc = "Put a concept on the current engram" })
 
   create("MiaConceptEdit", function(cmd)
     ui_concept.set_concept_meta(cmd.fargs[1])

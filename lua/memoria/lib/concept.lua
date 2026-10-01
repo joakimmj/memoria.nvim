@@ -97,19 +97,30 @@ function M.index(registry)
   return keys
 end
 
---- The concept a mention names: a key, a display name or an alias as written,
---- else a key its slug is. Exact matches come first, so `C++` finds the concept
---- displayed as `C++` even when another one's key is `c`.
+--- A function resolving mentions against one registry, its index built once:
+--- a key, a display name or an alias as written, else a key its slug is.
+--- Exact matches come first, so `C++` finds the concept displayed as `C++`
+--- even when another one's key is `c`.
+---@param registry memoria.ConceptRegistry
+---@return fun(mention: string): string? resolve Answers the key, nil when undeclared
+function M.resolver(registry)
+  local exact = M.index(registry)
+  return function(mention)
+    if exact[mention] then
+      return exact[mention]
+    end
+    local slugged = slug.slugify(mention)
+    return registry[slugged] and slugged or nil
+  end
+end
+
+--- The concept a mention names, see `resolver`. For one lookup; resolve many
+--- through one resolver.
 ---@param registry memoria.ConceptRegistry
 ---@param mention string As written in an engram
 ---@return string? key Nil when the mention is undeclared
 function M.resolve(registry, mention)
-  local exact = M.index(registry)[mention]
-  if exact then
-    return exact
-  end
-  local slugged = slug.slugify(mention)
-  return registry[slugged] and slugged or nil
+  return M.resolver(registry)(mention)
 end
 
 --- Every text a concept answers to exactly, sorted: its key, its display name
@@ -166,10 +177,8 @@ function M.types(cfg, registry)
   return types
 end
 
---- Whether a concept field takes a concept of this type. A field declaring a
---- type takes that one; a field declaring none takes every type. A name the
---- registry does not answer to has no type, and so contradicts nothing — it
---- stays the plain label it has always been.
+--- Whether a concept field takes a concept of this type: a typed field its
+--- own type, an untyped one any, and an undeclared mention (no type) either.
 ---@param cfg memoria.Config Brain config
 ---@param field string Concept field name
 ---@param concept_type? string The concept's own type, nil when it has none
@@ -216,34 +225,42 @@ function M.text_for(key, entry, form)
   return form == "display_name" and M.display_name(key, entry) or key
 end
 
---- A mention as a field of this form writes it: the resolved concept's key or
---- display name, or the mention as given when nothing answers to it.
----@param registry memoria.ConceptRegistry
----@param form memoria.ConceptForm
----@param mention string
----@return string text
----@return string? key The concept it resolved to
-function M.canonical(registry, form, mention)
-  local key = M.resolve(registry, mention)
-  if not key then
-    return mention
-  end
-  return M.text_for(key, registry[key], form), key
-end
-
---- A field's values rewritten in its form, in order, each concept once.
+--- A field's values rewritten in its form, in order, each concept once: a
+--- resolved one as its key or display name, an undeclared one as given.
 ---@param registry memoria.ConceptRegistry
 ---@param form memoria.ConceptForm
 ---@param values string[]
----@return string[]
+---@return string[] written
+---@return (string|false)[] keys What each written value resolved to, false when undeclared
 function M.canonical_list(registry, form, values)
-  local written, seen = {}, {}
+  local resolve = M.resolver(registry)
+  local written, keys, seen = {}, {}, {}
   for _, value in ipairs(values) do
-    local text, key = M.canonical(registry, form, value)
-    local identity = key or text
-    if not seen[identity] then
-      seen[identity] = true
+    local key = resolve(value)
+    local text = key and M.text_for(key, registry[key], form) or value
+    if not seen[key or text] then
+      seen[key or text] = true
       table.insert(written, text)
+      table.insert(keys, key or false)
+    end
+  end
+  return written, keys
+end
+
+--- A concept field's values as it writes them, refused when one is a concept
+--- of a type the field does not take.
+---@param cfg memoria.Config Brain config
+---@param registry memoria.ConceptRegistry
+---@param field string Concept field name
+---@param values string[] Mentions, in any spelling
+---@return string[]? written In the field's form, each concept once
+---@return string? err Which concept the field refuses
+function M.field_values(cfg, registry, field, values)
+  local written, keys = M.canonical_list(registry, M.form(cfg, field), values)
+  for _, key in ipairs(keys) do
+    local concept_type = key and registry[key].type or nil
+    if key and not M.accepts(cfg, field, concept_type) then
+      return nil, ("%s is a %s, %s takes %s"):format(key, concept_type, field, cfg.frontmatter[field].concept_type)
     end
   end
   return written
