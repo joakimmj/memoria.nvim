@@ -1,0 +1,14 @@
+{
+  "name": "memoria-viewer",
+  "version": "0.1.0",
+  "description": "Browse a memoria brain and walk its synapses in a docked pane",
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "mia": {
+      "type": "string",
+      "title": "mia command",
+      "description": "Path to memoria's CLI (bin/mia). Empty: ask Neovim where memoria.nvim is, else `mia` on PATH.",
+      "default": ""
+    }
+  }
+}

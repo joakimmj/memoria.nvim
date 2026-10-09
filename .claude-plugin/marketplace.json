@@ -1,0 +1,12 @@
+{
+  "name": "memoria.nvim",
+  "description": "Claude Code plugins for memoria.nvim brains.",
+  "owner": { "name": "joakimmj" },
+  "plugins": [
+    {
+      "name": "memoria-viewer",
+      "source": "./memoria-viewer",
+      "description": "Browse a memoria brain and walk its synapses in a docked pane."
+    }
+  ]
+}
