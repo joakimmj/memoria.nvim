@@ -541,6 +541,10 @@ brain is registered (|memoria-brains|).
                             Put a concept in an engram's concept field, in
                             the field's form. A name nothing declares goes in
                             as given
+    frontmatter {file}      One engram's configured frontmatter fields, sorted
+                            by name: each with its kind, type, form and the
+                            values as written; a concept field also with the
+                            key and display name each value resolves to
     edit-frontmatter {source} {field} {value}
                             Set a value field on an engram: replaces a single
                             value, adds to a list, and "" clears it

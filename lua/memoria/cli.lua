@@ -11,6 +11,7 @@ local engram = require("memoria.modules.engram")
 local file = require("memoria.lib.file")
 local frontmatter = require("memoria.modules.frontmatter")
 local frontmatter_lib = require("memoria.lib.frontmatter")
+local md_drafting = require("memoria.lib.md-drafting")
 local synapse = require("memoria.modules.synapse")
 
 ---@class memoria.CliArgument
@@ -532,6 +533,57 @@ M.commands = {
           return nil, err
         end
         return attached
+      end)
+    end,
+  },
+  {
+    name = "frontmatter",
+    description = "One engram's frontmatter fields: each with its kind, type and form, and its values",
+    arguments = {
+      { name = "<file>", required = true, description = "Engram filename in the brain" },
+      BRAIN,
+    },
+    run = function(args)
+      return in_brain(args, function(target, cfg)
+        local filename = vim.fs.basename(args.positional[1])
+        local lines = file.read_lines(engram_path(target, filename))
+        if not lines then
+          return nil, "no engram " .. filename
+        end
+        local values, _, err = md_drafting.syntax.parse_frontmatter(lines)
+        if err then
+          return nil, ("%s: frontmatter: %s"):format(filename, err)
+        end
+
+        local registry = concept_lib.read(target.location)
+        local resolve = concept_lib.resolver(registry)
+        local fields = {}
+        for _, name in ipairs(frontmatter_lib.field_names(cfg.frontmatter)) do
+          local field = cfg.frontmatter[name]
+          local written = frontmatter_lib.as_list(values and values[name])
+          local row = {
+            name = name,
+            kind = field.kind,
+            list = field.list ~= false,
+            values = field.list == false and (written[1] or "") or written,
+          }
+          if field.kind == "concept" then
+            row.concept_type = field.concept_type
+            row.concept_form = concept_lib.form(cfg, name)
+            -- What each value names, so a reader can label and follow it
+            -- without resolving it itself; an undeclared one has no key.
+            row.concepts = vim.tbl_map(function(text)
+              local key = resolve(text)
+              return {
+                text = text,
+                key = key,
+                display_name = key and concept_lib.display_name(key, registry[key]) or nil,
+              }
+            end, written)
+          end
+          table.insert(fields, row)
+        end
+        return { brain = target.name, file = filename, fields = fields }
       end)
     end,
   },

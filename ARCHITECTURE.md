@@ -3252,7 +3252,7 @@ named brain, or the only one registered.
 | `create-concept --name N --type T [--slug S] [--meta k=v]` | `create_concept` (§6.4) | the concept registered; `--name` is the display name, the key its slug unless `--slug` gives one; a key or display name already taken is an error |
 | `edit-concept --name N [--type T] [--meta k=v]` | `set_concept_meta` (§6.4) | the concept as written; `--name` is any mention that resolves (§6.3), `--meta k=` removes a key, a concept not registered is an error |
 | `attach-concept <source> <field> <concept>` | `attach_concept` (§6.4) | the brain, source, field and the text it wrote |
-| `frontmatter <file>` | the file's frontmatter, read through md-drafting (Part 2 §1), and the `frontmatter` config (§5.2) | per configured field, sorted by name: name, `kind`, `concept_type` (concept fields), `list`, `concept_form` (concept fields), and the values it holds as written — `[]` or `""` when empty; frontmatter that cannot be read is an error |
+| `frontmatter <file>` | the file's frontmatter, read through md-drafting (Part 2 §1), and the `frontmatter` config (§5.2) | per configured field, sorted by name: name, `kind`, `concept_type` (concept fields), `list`, `concept_form` (concept fields), and the values it holds as written — `[]` or `""` when empty; a concept field adds `concepts`, each value's `text` with the `key` and `display_name` it resolves to (none when undeclared); frontmatter that cannot be read is an error |
 | `edit-frontmatter <source> <field> <value>` | `edit_frontmatter_field` (§5.7) | the brain, source, field and the value the field now holds; `""` clears it |
 | `commands` | `cli.lua`'s own table | every command with its arguments, as a schema |
 
