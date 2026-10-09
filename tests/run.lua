@@ -1915,6 +1915,7 @@ check(
     "create-concept",
     "edit-concept",
     "attach-concept",
+    "frontmatter",
     "edit-frontmatter",
     "commands",
   }
@@ -1958,6 +1959,7 @@ check(
     "  create-concept [--brain <name>] --name <name> --type <type> [--slug <slug>] [--meta <name=value>]",
     "  edit-concept [--brain <name>] --name <name> [--type <type>] [--meta <name=value>]",
     "  attach-concept <source> <field> <concept> [--brain <name>]",
+    "  frontmatter <file> [--brain <name>]",
     "  edit-frontmatter <source> <field> <value> [--brain <name>]",
     "  commands",
   }
@@ -2216,6 +2218,60 @@ check(
   "cli edit-frontmatter, a concept field",
   ran({ "edit-frontmatter", "--brain", "made", vim.fs.basename(new.path), "tags", "x" }),
   "(made) no value field 'tags'"
+)
+
+vim.fn.writefile(
+  { "---", "created: 2023-03-03", "author: me", "tags: [java, J, loose]", "---", "# Fields" },
+  made.location .. "/fields.md"
+)
+check(
+  "cli frontmatter, every configured field, sorted, with what it is",
+  ran({
+    "frontmatter",
+    "--brain",
+    "made",
+    "fields.md",
+  }),
+  {
+    brain = "made",
+    file = "fields.md",
+    fields = {
+      { name = "created", kind = "value", list = false, values = "2023-03-03" },
+      {
+        name = "tags",
+        kind = "concept",
+        list = true,
+        concept_type = "tag",
+        concept_form = "slug",
+        values = { "java", "J", "loose" },
+        concepts = {
+          { text = "java", key = "java", display_name = "Java" },
+          { text = "J", key = "java", display_name = "Java" },
+          { text = "loose" },
+        },
+      },
+    },
+  }
+)
+vim.fn.writefile({ "---", "---", "# Empty" }, made.location .. "/fields.md")
+check(
+  "cli frontmatter, empty fields",
+  vim.tbl_map(function(field)
+    return field.values
+  end, ran({ "frontmatter", "--brain", "made", "fields.md" }).fields),
+  { "", {} }
+)
+vim.fn.writefile({ "---", "tags: [a,", "---" }, made.location .. "/fields.md")
+check(
+  "cli frontmatter, unreadable frontmatter",
+  ran({ "frontmatter", "--brain", "made", "fields.md" }),
+  "(made) fields.md: frontmatter: line 2: unclosed flow list for 'tags'"
+)
+vim.fn.delete(made.location .. "/fields.md")
+check(
+  "cli frontmatter, an engram that is not there",
+  ran({ "frontmatter", "--brain", "made", "nope.md" }),
+  "(made) no engram nope.md"
 )
 check(
   "cli create-engram --field sets a value field",
