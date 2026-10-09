@@ -1949,7 +1949,7 @@ check(
     "  engrams [--brain <name>] [--concept <concept>]",
     "  engram <file> [--brain <name>]",
     "  concepts [--brain <name>] [--type <type>] [--undeclared]",
-    "  tasks [--brain <name>] [--state <state>]",
+    "  tasks [--brain <name>] [--state <state>] [--engram <file>]",
     "  check [--brain <name>]",
     "  rebuild [--brain <name>] [--fix]",
     "  create-engram [--brain <name>] --title <title> [--field <name=value>] [--body <text>] [--concept <name>] "
@@ -2032,6 +2032,33 @@ check(
   ran({ "tasks", "--brain", "graph", "--state", "bogus" }),
   "(graph) no task state 'bogus'; it is 'not_done' or 'done'"
 )
+
+write_engram("t1.md", { "# T1", "- [ ] first", "- [x] second" })
+write_engram("t2.md", { "# T2", "- [ ] other" })
+local function texts(tasks)
+  return vim.tbl_map(function(task)
+    return task.engram .. ":" .. task.text
+  end, tasks)
+end
+local one = ran({ "tasks", "--brain", "graph", "--engram", "t1.md" }).tasks
+check("cli tasks --engram, only that engram's", { texts(one.not_done), texts(one.done) }, {
+  { "t1.md:first" },
+  { "t1.md:second" },
+})
+check(
+  "cli tasks --engram, with a state, and a path for the file",
+  texts(
+    ran({ "tasks", "--brain", "graph", "--state", "not_done", "--engram", graph.location .. "/t2.md" }).tasks.not_done
+  ),
+  { "t2.md:other" }
+)
+check(
+  "cli tasks --engram, an engram the atlas does not know",
+  ran({ "tasks", "--brain", "graph", "--engram", "nope.md" }),
+  "(graph) no engram 'nope.md'"
+)
+vim.fn.delete(engram_path("t1.md"))
+vim.fn.delete(engram_path("t2.md"))
 
 local checked = ran({ "check", "--brain", "graph" })
 check("cli check, the count", checked.engrams, 3)
