@@ -3242,7 +3242,7 @@ named brain, or the only one registered.
 | `engrams [--concept C]` | the atlas, refreshed (§7.1) | per engram: filename, title, concept fields, `modified`; only those referencing `C` when given |
 | `search --query Q [--fields F]` | `search_engrams` (§9.6) | matching engrams, best first, each with its score |
 | `rebuild-index` | `rebuild_index` (§9.3) | the path of `index.md` as written |
-| `engram <file>` | the atlas + the file | its atlas entry, its backlinks, its content |
+| `engram <file>` | the atlas + the file | its atlas entry, its backlinks, its content, and the brain's date formats — `filename_date_format` (`engrams.filename.date_format`) and `date_format` (`engrams.date_format`, what `%date%` and so `created` are written in) — for reading an engram's date |
 | `tasks [--state not_done\|done] [--engram <file>]` | the atlas's `tasks` | the bucket, or both; with `--engram`, only that engram's tasks, and a file the atlas does not know is an error |
 | `check` | `rebuild_atlas` (§7.2) | the problems, each with file, line and kind |
 | `rebuild [--fix]` | `rebuild_atlas`, `opts.fix` with `--fix` | the problems left after it |
