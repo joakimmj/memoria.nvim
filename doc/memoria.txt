@@ -507,7 +507,10 @@ brain is registered (|memoria-brains|).
                             when given. With
                             --undeclared, the mentions nothing resolves to
                             instead, most-used first
-    tasks [--state S]       The tasks, by state: "not_done", "done", or both
+    tasks [--state S] [--engram F]
+                            The tasks, by state: "not_done", "done", or both;
+                            only engram F's when given, an engram the atlas
+                            does not know being an error
     check                   Rebuild the atlas and report what is wrong, each
                             with its file, line and kind
     rebuild [--fix]         The same; with --fix, repair what can be

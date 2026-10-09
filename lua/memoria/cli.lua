@@ -300,6 +300,7 @@ M.commands = {
     arguments = {
       BRAIN,
       { name = "--state", value = "state", description = "Only 'not_done' or 'done'" },
+      { name = "--engram", value = "file", description = "Only this engram's tasks" },
     },
     run = function(args)
       return in_brain(args, function(target)
@@ -313,10 +314,17 @@ M.commands = {
           return nil, err
         end
 
+        local engram = args.options.engram and vim.fs.basename(args.options.engram --[[@as string]])
+        if engram and not current.engrams[engram] then
+          return nil, ("no engram '%s'"):format(engram)
+        end
+
         local tasks = {}
         for _, name in ipairs({ "not_done", "done" }) do
           if not state or state == name then
-            tasks[name] = current.tasks[name] or {}
+            tasks[name] = vim.tbl_filter(function(task)
+              return not engram or task.engram == engram
+            end, current.tasks[name] or {})
           end
         end
         return { brain = target.name, tasks = tasks }
