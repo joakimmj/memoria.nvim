@@ -220,13 +220,13 @@ M.commands = {
   },
   {
     name = "engram",
-    description = "One engram: its atlas entry, its backlinks and its content",
+    description = "One engram: its atlas entry, its backlinks, its content and the brain's date formats",
     arguments = {
       { name = "<file>", required = true, description = "Engram filename in the brain" },
       BRAIN,
     },
     run = function(args)
-      return in_brain(args, function(target)
+      return in_brain(args, function(target, cfg)
         local current, err = atlas.refresh(target)
         if not current then
           return nil, err
@@ -247,6 +247,10 @@ M.commands = {
           entry = vim.tbl_extend("force", entry, { synapses = object(entry.synapses) }),
           backlinks = current.backlinks[filename] or {},
           content = table.concat(lines or {}, "\n"),
+          -- What dates are written in — a dated filename's prefix, and %date%
+          -- (the `created` default) — so a reader need not guess the format.
+          filename_date_format = cfg.engrams.filename.date_format,
+          date_format = cfg.engrams.date_format,
         }
       end)
     end,

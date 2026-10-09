@@ -499,8 +499,8 @@ brain is registered (|memoria-brains|).
     engrams [--concept C]   Every engram: filename, title, concept fields
                             and when it changed; only those naming C, or
                             any of its aliases, when given
-    engram {file}           One engram: its atlas entry, its backlinks and
-                            its content
+    engram {file}           One engram: its atlas entry, its backlinks, its
+                            content and the brain's date formats
     concepts [--type T] [--undeclared]
                             Every registered concept, key and display name,
                             with the engrams naming it; only those of type T

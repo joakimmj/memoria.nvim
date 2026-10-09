@@ -2025,6 +2025,10 @@ local shown = ran({ "engram", "--brain", "graph", "a.md" })
 check("cli engram, its entry", shown.entry.title, "A")
 check("cli engram, its backlinks", shown.backlinks, { "b.md" })
 check("cli engram, its content", shown.content, table.concat(vim.fn.readfile(engram_path("a.md")), "\n"))
+check("cli engram, the brain's date formats", { shown.filename_date_format, shown.date_format }, {
+  "YYYY-MM-DD",
+  "YYYY-MM-DD",
+})
 check("cli engram, one that is not there", ran({ "engram", "--brain", "graph", "zzz.md" }), "(graph) no engram zzz.md")
 
 check("cli tasks, both buckets", sorted_keys(ran({ "tasks", "--brain", "graph" }).tasks), { "done", "not_done" })
