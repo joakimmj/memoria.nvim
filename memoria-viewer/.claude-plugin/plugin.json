@@ -2,6 +2,9 @@
   "name": "memoria-viewer",
   "version": "0.1.0",
   "description": "Browse a memoria brain and walk its synapses in a docked pane",
+  "author": {
+    "name": "joakimmj"
+  },
   "types": "./types/index.d.ts",
   "userConfig": {
     "mia": {

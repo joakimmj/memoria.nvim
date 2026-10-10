@@ -20,8 +20,6 @@ export type NavigationProps = {
     onPickBrain: () => void
     onPickEngram: () => void
     onBack: () => void
-    onStepDown: () => void
-    onStepUp: () => void
     onForward: () => void
     onReload: () => void
     onSummary: () => void
@@ -68,8 +66,6 @@ export default function Navigation({
     onPickBrain,
     onPickEngram,
     onBack,
-    onStepDown,
-    onStepUp,
     onForward,
     onReload,
     onSummary,
@@ -86,8 +82,6 @@ export default function Navigation({
         <Box flexDirection="column" borderStyle="round" borderColor={REDOX.teal} paddingX={1}>
             <Box flexDirection="row" gap={1}>
                 <Button plain hotkey="h" dimColor={stack.length === 0} label="←" onPress={onBack}/>
-                <Button plain hotkey="j" label="↓" onPress={onStepDown}/>
-                <Button plain hotkey="k" label="↑" onPress={onStepUp}/>
                 <Button plain hotkey="l" dimColor={fwdStack.length === 0} label="→" onPress={onForward}/>
                 <Button plain hotkey="b" label="brain" onPress={onPickBrain}/>
                 <Button plain hotkey="e" label="engram" onPress={onPickEngram}/>

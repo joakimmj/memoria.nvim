@@ -383,21 +383,6 @@ async function openEngram(
     return {ok: true}
 }
 
-// VIEW's first visible row, as `ui.scroll` last set it.
-let viewOffset = 0
-// Rows `j`/`k` asked for, applied by the `ui.scroll` hook.
-let pendingRows = 0
-
-/**
- * `j`/`k`: one row, like the arrow keys. `$.ui.scroll` only takes targets, so
- * this asks for the end it moves toward (a no-op raises no event) and the
- * `ui.scroll` hook moves the window by the rows instead.
- */
-async function scrollRows($: EngineInterface, rows: number): Promise<void> {
-    pendingRows += rows
-    await $.ui.scroll({in: VIEW, to: rows > 0 ? 'end' : 'start'}).catch(() => undefined)
-}
-
 async function goBack($: EngineInterface): Promise<void> {
     const stack = await read($, history)
     if (stack.length === 0) return
@@ -649,20 +634,7 @@ export const register: Register = (on, options) => {
         await update($, history, () => [])
         await update($, forward, () => [])
         await update($, pending, () => null)
-        viewOffset = 0
         return next(e)
-    })
-
-    on('ui.scroll', {component: 'Pane', requestId: VIEW}, async ($, e, next) => {
-        let offset = e.offset
-        if (e.origin.kind === 'plugin' && pendingRows !== 0) {
-            const last = Math.max(0, e.contentRows - e.bodyRows)
-            offset = Math.min(Math.max(viewOffset + pendingRows, 0), last)
-            pendingRows = 0
-        }
-        const result = await next(offset === e.offset ? e : {...e, offset})
-        if (!result.deny) viewOffset = offset
-        return result
     })
 
     on('ui.render', {component: 'Pane', requestId: PICK}, async ($, e) => {
@@ -784,12 +756,6 @@ export const register: Register = (on, options) => {
                     }}
                     onBack={() => {
                         void goBack($)
-                    }}
-                    onStepDown={() => {
-                        void scrollRows($, 1)
-                    }}
-                    onStepUp={() => {
-                        void scrollRows($, -1)
                     }}
                     onForward={() => {
                         void goForward($)

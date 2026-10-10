@@ -20,8 +20,6 @@ export type HeaderProps = {
     | 'onPickBrain'
     | 'onPickEngram'
     | 'onBack'
-    | 'onStepDown'
-    | 'onStepUp'
     | 'onForward'
     | 'onReload'
     | 'onSummary'
@@ -43,8 +41,6 @@ export default function Header({
     onPickBrain,
     onPickEngram,
     onBack,
-    onStepDown,
-    onStepUp,
     onForward,
     onReload,
     onSummary,
@@ -69,8 +65,6 @@ export default function Header({
                 onPickBrain={onPickBrain}
                 onPickEngram={onPickEngram}
                 onBack={onBack}
-                onStepDown={onStepDown}
-                onStepUp={onStepUp}
                 onForward={onForward}
                 onReload={onReload}
                 onSummary={onSummary}

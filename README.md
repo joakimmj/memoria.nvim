@@ -31,6 +31,8 @@ Full reference: `:help memoria`.
   `.mia_dna.json`.
 - **CLI:** `bin/mia` is memoria with no editor running — the same functions the
   commands call, from a shell, one JSON object per run.
+- **Claude Code viewer:** `memoria-viewer`, a plugin that browses a brain and
+  shows engrams in a pane beside the conversation.
 
 ## 📦 Installation
 
@@ -223,4 +225,51 @@ hand-added link misses its inverse.
 Use `<path-to>/memoria.nvim/bin/mia`. Start with `bin/mia commands`, which
 prints every command and its arguments as JSON. Each call prints one JSON
 object and exits 0 (`"ok": true`) or 1.
+```
+
+## 👓 Claude Code viewer
+
+`memoria-viewer` is a [Claude Code](https://claude.com/claude-code) plugin
+shipped in this repository. It browses a brain and shows an engram in a docked
+pane: its frontmatter fields and task counts, its synapses to walk, a summary
+of the engrams it is linked to with their tasks, and concept values that list
+the engrams naming them. It reads everything through `bin/mia`.
+
+Install it from the memoria.nvim checkout Neovim already has — the path is
+your plugin manager's, here lazy.nvim's:
+
+```
+/plugin marketplace add ~/.local/share/nvim/lazy/memoria.nvim
+/plugin install memoria-viewer@memoria.nvim
+```
+
+or straight from GitHub:
+
+```
+/plugin install memoria-viewer --marketplace joakimmj/memoria.nvim
+```
+
+Then `/memoria` picks a brain and an engram, `/memoria <brain> <engram>` opens
+one directly, and `/memoria -s` summarises the one on screen. Keys are shown
+in the pane.
+
+The viewer needs `mia`, and looks for it in this order:
+
+1. the plugin's `mia` option, a path to `bin/mia` (set it in `/plugin`);
+2. the memoria.nvim on Neovim's runtimepath — nothing to set up when Neovim
+   loads memoria at startup;
+3. `mia` on your `PATH`.
+
+The arrow keys scroll the pane. For `j`/`k` as well, bind them in
+`~/.claude/keybindings.json` — this applies to every plugin pane:
+
+```json
+{
+  "bindings": [
+    {
+      "context": "Pane",
+      "bindings": { "j": "pane:scrollDown", "k": "pane:scrollUp" }
+    }
+  ]
+}
 ```
