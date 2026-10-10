@@ -76,6 +76,7 @@
     - [11.2 Output](#112-output)
     - [11.3 Commands](#113-commands)
     - [11.4 Running beside the editor](#114-running-beside-the-editor)
+    - [11.5 memoria-viewer](#115-memoria-viewer)
   - [12. Decisions](#12-decisions)
 
 ---
@@ -1588,7 +1589,9 @@ says what may call it:
 
 Commands live in `lua/` rather than `plugin/` because they may only exist once
 the guard has passed, which `setup()` decides. `bin/mia`, outside `lua/`, is
-the CLI's executable (§11).
+the CLI's executable (§11). `memoria-viewer/` and `.claude-plugin/`, also
+outside `lua/`, are a Claude Code plugin and the repository's marketplace
+manifest for it (§11.5) — no Lua, and nothing Neovim loads.
 
 `modules/` is the model, `ui/` the view, and `commands.lua` and `cli.lua` the
 two controllers over them. `commands.lua` holds registrations only; everything
@@ -3310,6 +3313,45 @@ side reads next picks up what the other wrote. Two processes writing
 `.mia_atlas.json` at once leave the later write, which is fine for a file that
 is derived and rebuildable by definition.
 
+### 11.5 memoria-viewer
+
+A Claude Code plugin in `memoria-viewer/`, and the CLI's first caller shipped
+with it: it browses a brain and shows an engram in a docked pane. It is a
+hooks module in TypeScript, not Lua, and reads a brain **only through
+`bin/mia`** — it parses no frontmatter, counts no checkboxes and resolves no
+concept itself, so what it shows is what memoria's own rules say.
+
+| Shown | Read with |
+|---|---|
+| The brain and engram pickers | `brains`, `engrams` |
+| An engram's body, title and synapses | `engram <file>` |
+| Its frontmatter fields, a concept by its display name | `frontmatter <file>` |
+| Its task counts | `tasks --engram <file>` |
+| The engrams naming a concept, when its value is pressed | `engrams --concept` |
+| The chain summary: the engrams reachable by synapses, their tasks and concept fields | `engram` per engram, `tasks` |
+
+The summary orders its engrams by date when they have one — the filename's
+prefix in `filename_date_format`, else `created` in `date_format`, both
+answered by `engram` — and puts undated ones last.
+
+It writes nothing. Its one tool, `show_engram`, lets a model put an engram on
+the pane or say that one changed; the write itself is the CLI's.
+
+**Finding `mia`**, in this order: the plugin's `mia` option; `bin/mia` on
+Neovim's runtimepath, asked once per session with `nvim --headless`; `mia` on
+`PATH`. The second needs no setup and cannot drift from the memoria the editor
+runs; it asks nothing new of the user, since `mia` itself already needs
+memoria loaded at startup (§11.1).
+
+**The repository is its marketplace.** `.claude-plugin/marketplace.json` at the
+root names the plugin with `source: "./memoria-viewer"`, so it installs from
+the checkout a plugin manager already made, or from GitHub.
+
+**Scrolling is the pane's own.** A plugin cannot scroll its pane by rows — the
+call takes a target, not a distance — so the viewer binds no scroll keys: the
+arrow keys scroll, and `j`/`k` are the user's to bind to `pane:scrollDown` and
+`pane:scrollUp` in Claude Code's keybindings.
+
 ---
 
 ## 12. Decisions
@@ -3442,6 +3484,14 @@ is derived and rebuildable by definition.
   lives on the engram, and has Detach as its inverse.
 - **The CLI reads and adds, never renames or deletes** (§11.3) — those two
   reach beyond the file named, and stay behind a person in the editor.
+- **memoria-viewer reads only through the CLI** (§11.5) — a second parser of
+  frontmatter, task markers or concepts would drift from memoria's; the two
+  reads it needed, `frontmatter` and `tasks --engram`, were added to the CLI
+  instead.
+- **The viewer asks Neovim where `mia` is** (§11.5) — a marketplace install
+  copies only the plugin's folder, so `bin/mia` is not beside it; Neovim's
+  runtimepath names the memoria actually in use, with an option and `PATH`
+  for the layouts that defeats.
 - **The CLI's command table is an ordered list** (§11.3) — `commands` is how an
   caller discovers the surface, and a list is the only way that answer is the
   same twice. The MCP server in Open items generates its tools from the same

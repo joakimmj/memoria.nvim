@@ -214,8 +214,8 @@ string nobody checks.
 
 ## Delivery 5 — memoria-viewer
 
-A Claude Code plugin for viewing engrams, built on `bin/mia`, and shipped from
-this repository as its own plugin marketplace:
+A Claude Code plugin for viewing engrams, built on `bin/mia` (§11.5), and
+shipped from this repository as its own plugin marketplace:
 
 ```
 /plugin marketplace add joakimmj/memoria.nvim
@@ -223,14 +223,29 @@ this repository as its own plugin marketplace:
 ```
 
 **Ships:**
-- The `memoria-viewer` plugin and the repository's marketplace manifest
-- The CLI's `tasks --engram <file>` — one engram's tasks; a file the atlas
-  does not know is an error (§11.3)
-- The CLI's `frontmatter <file>` — one engram's configured fields, each with
-  its kind, type and form, and its values (§11.3)
+- The `memoria-viewer` plugin in `memoria-viewer/` and the repository's
+  marketplace manifest, `.claude-plugin/marketplace.json`
+- The CLI reads it needs (§11.3), so it parses nothing itself:
+  - `tasks --engram <file>` — one engram's tasks; a file the atlas does not
+    know is an error
+  - `frontmatter <file>` — one engram's configured fields, each with its
+    kind, type and form, its values, and what each concept value resolves to
+  - `engram <file>` also answering `filename_date_format` and `date_format`
+- The engram view: frontmatter fields, task counts, synapses to walk, and
+  concept values that list the engrams naming them
+- The chain summary: the engrams reachable by synapses, by date where they
+  have one, with their tasks and concept fields
+- `mia` found through the plugin's `mia` option, else Neovim's runtimepath,
+  else `PATH`
+- The viewer in the README: installing it, how it finds `mia`, and the
+  optional `j`/`k` scroll binding
+
+**Explicitly not yet:**
+- No writing from the pane: it shows, and a model's `show_engram` call only
+  points it at an engram.
 
 **What this unlocks:** engrams read inside Claude Code, through the same CLI
-an agent uses, with the two reads the viewer needs.
+an agent uses, so the viewer shows a brain by memoria's own rules.
 
 ---
 
