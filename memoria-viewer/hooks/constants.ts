@@ -2,8 +2,9 @@ export const PICK = 'memoria-pick'
 export const VIEW = 'memoria-view'
 export const OWN_PLUGIN = 'memoria-viewer'
 
-// Keeps one huge engram from eating the render budget (100000 characters).
-export const BODY_LIMIT = 9500
+// The host draws the first 100000 characters of a tree's texts; the body gets
+// most of that and the rest is left for the header, fields, tasks and labels.
+export const BODY_LIMIT = 90000
 export const MAX_HISTORY = 50
 
 // `EngramBody` keys heading i as `${BODY_KEY}-h-${i}`.
